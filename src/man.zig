@@ -13,10 +13,74 @@ const md = @import("md");
 const Allocator = std.mem.Allocator;
 const Node = md.Node;
 const escape = @import("escape.zig");
+const expr = @import("expr.zig");
 const Font = escape.Font;
 
 /// Deepest `.RS` nesting followed; more is ignored.
 const max_levels = 16;
+
+const Definition = struct {
+    name: []const u8,
+    append: bool,
+    end: []const u8,
+    lines: std.ArrayList([]const u8) = .empty,
+};
+
+/// Deepest nesting of user macro calls followed.
+const max_macro_depth = 16;
+
+/// True when `l` ends a macro definition or `.ig` block. The end is `..` or
+/// `.NAME`, and blanks are allowed after the first dot (Asciidoctor writes `.  .`).
+fn endsDefinition(l: []const u8, end: []const u8) bool {
+    if (l.len == 0 or l[0] != '.') return false;
+    const after = std.mem.trimStart(u8, l[1..], " \t");
+    return std.mem.startsWith(u8, after, end[1..]);
+}
+
+/// Copy mode: `\\` becomes `\`, so a body written as `\\$1` ends up as `\$1`.
+fn copyMode(a: Allocator, l: []const u8) Allocator.Error![]const u8 {
+    if (std.mem.indexOf(u8, l, "\\\\") == null) return l;
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < l.len) : (i += 1) {
+        if (l[i] == '\\' and i + 1 < l.len and l[i + 1] == '\\') i += 1;
+        try out.append(a, l[i]);
+    }
+    return out.items;
+}
+
+/// Replaces `\$1` ... `\$9`, `\$*` and `\$#` by the macro's arguments.
+fn substArgs(a: Allocator, l: []const u8, args: []const []const u8) Allocator.Error![]const u8 {
+    if (std.mem.indexOf(u8, l, "\\$") == null) return l;
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < l.len) : (i += 1) {
+        if (l[i] == '\\' and i + 2 < l.len + 0 and l[i + 1] == '$') {
+            const c = l[i + 2];
+            if (c >= '1' and c <= '9') {
+                const n = c - '1';
+                if (n < args.len) try out.appendSlice(a, args[n]);
+                i += 2;
+                continue;
+            }
+            if (c == '*' or c == '@') {
+                for (args, 0..) |arg, k| {
+                    if (k > 0) try out.append(a, ' ');
+                    try out.appendSlice(a, arg);
+                }
+                i += 2;
+                continue;
+            }
+            if (c == '#') {
+                try out.print(a, "{d}", .{args.len});
+                i += 2;
+                continue;
+            }
+        }
+        try out.append(a, l[i]);
+    }
+    return out.items;
+}
 
 const Parser = struct {
     a: Allocator,
@@ -43,11 +107,18 @@ const Parser = struct {
     nofill: bool = false,
     code: std.ArrayList(u8) = .empty,
     in_tbl: bool = false,
-    tbl_format_done: bool = false,
-    /// While skipping a macro definition or `.ig` block: the line that ends it.
+    tbl_lines: std.ArrayList([]const u8) = .empty,
+    /// While skipping an `.ig` block: the line that ends it.
     skip_end: ?[]const u8 = null,
+    /// User-defined macros (`.de`): name to body lines, in copy mode.
+    macros: std.StringHashMapUnmanaged([]const []const u8) = .empty,
+    /// The macro being defined, until its end line.
+    def: ?Definition = null,
+    macro_depth: usize = 0,
     skip_depth: usize = 0,
     last_cond: bool = false,
+    /// Indent (columns) used by `.TP`, `.IP` and `.RS` when they give none.
+    indent: u16 = 7,
     continued: bool = false,
     line_no: u32 = 0,
 
@@ -79,6 +150,7 @@ const Parser = struct {
         if (self.code.items.len == 0) return;
         const b = try self.node(.code_block);
         b.literal = try self.a.dupe(u8, self.code.items);
+        b.indent = Node.flush;
         self.cur.appendChild(b);
         self.code.clearRetainingCapacity();
     }
@@ -101,14 +173,33 @@ const Parser = struct {
         if (self.pending_term != null) self.pending_term = null;
     }
 
+    /// Body text of a section is indented by this many columns, a subsection
+    /// heading by `sub_indent` (as groff's man macros do on a terminal).
+    const body_indent: u16 = 7;
+    const sub_indent: u16 = 3;
+
     fn heading(self: *Parser, level: u8, args: []const []const u8) Allocator.Error!void {
         self.endGroup();
-        self.container = self.root;
         self.depth = 0;
-        self.cur = self.root;
         const h = try self.node(.heading);
         h.level = level;
-        self.root.appendChild(h);
+        // `.SH` heading at the left edge, its body in a quote indented 7;
+        // `.SS` heading in a quote indented 3 whose body quote adds 4 more.
+        const body = try self.node(.block_quote);
+        if (level == 3) {
+            const head_quote = try self.node(.block_quote);
+            head_quote.indent = sub_indent;
+            self.root.appendChild(head_quote);
+            head_quote.appendChild(h);
+            body.indent = body_indent - sub_indent;
+            head_quote.appendChild(body);
+        } else {
+            self.root.appendChild(h);
+            body.indent = body_indent;
+            self.root.appendChild(body);
+        }
+        self.container = body;
+        self.cur = body;
         if (args.len == 0) {
             self.pending_heading = h;
             return;
@@ -119,7 +210,10 @@ const Parser = struct {
 
     /// Starts a definition list entry whose term is `tag` (or filled by the
     /// next line when null).
-    fn startTagged(self: *Parser, tag: ?[]const u8) Allocator.Error!void {
+    fn startTagged(self: *Parser, tag: ?[]const u8, width: ?[]const u8) Allocator.Error!void {
+        if (width) |w| if (escape.columns(w)) |c| {
+            self.indent = c;
+        };
         self.endPara();
         self.open_list = null;
         const dl = self.open_dl orelse blk: {
@@ -131,6 +225,7 @@ const Parser = struct {
         };
         const term = try self.node(.deflist_term);
         const def = try self.node(.deflist_def);
+        def.indent = self.indent;
         dl.appendChild(term);
         dl.appendChild(def);
         self.cur = def;
@@ -159,12 +254,16 @@ const Parser = struct {
             std.mem.eql(u8, tag, "*") or std.mem.eql(u8, tag, "-") or std.mem.eql(u8, tag, "\\-") or std.mem.eql(u8, tag, "o");
     }
 
-    fn pushQuote(self: *Parser) Allocator.Error!void {
+    fn pushQuote(self: *Parser, width: ?[]const u8) Allocator.Error!void {
         self.endGroup();
         if (self.depth >= max_levels) return;
+        const cols: u16 = if (width) |w| (escape.columns(w) orelse self.indent) else self.indent;
         self.levels[self.depth] = self.container;
         self.depth += 1;
+        // `.RS 0` indents nothing, but still pairs with its `.RE`.
+        if (cols == 0) return;
         const q = try self.node(.block_quote);
+        q.indent = cols;
         self.container.appendChild(q);
         self.container = q;
         self.cur = q;
@@ -328,6 +427,7 @@ const Parser = struct {
         el,
         so,
         nr,
+        rr,
         ft,
         ce,
         ta,
@@ -358,22 +458,28 @@ const Parser = struct {
     };
 
     fn request(self: *Parser, l: []const u8) Allocator.Error!void {
-        const body = std.mem.trimStart(u8, l, " \t");
+        const body = stripComment(std.mem.trimStart(u8, l, " \t"));
         if (body.len == 0) return;
-        if (std.mem.startsWith(u8, body, "\\\"")) return; // comment
         const name_end = std.mem.indexOfAny(u8, body, " \t") orelse body.len;
         const name = body[0..name_end];
         const rest = std.mem.trimStart(u8, body[name_end..], " \t");
 
-        const req = std.meta.stringToEnum(Request, name) orelse return; // unknown requests are ignored
         const args = try splitArgs(self.a, rest);
+        // Names that are not built in may be user macros; anything else is ignored.
+        const req = std.meta.stringToEnum(Request, name) orelse return self.callMacro(name, args);
 
-        if (self.nofill and self.in_tbl == false) {
+        if (self.nofill) {
             switch (req) {
                 .fi, .EE, .RE, .TS => {},
                 .B, .I, .SM, .SB, .BR, .BI, .IB, .RB, .IR, .RI => {
                     // Font macros inside a code block: keep the text.
-                    for (args) |arg| try self.code.appendSlice(self.a, try escape.plain(self.a, &self.st, arg));
+                    // .B .I .SM .SB separate their arguments with spaces; the
+                    // alternating macros (.BR, .BI, ...) do not.
+                    const spaced = req == .B or req == .I or req == .SM or req == .SB;
+                    for (args, 0..) |arg, k| {
+                        if (k > 0 and spaced) try self.code.append(self.a, ' ');
+                        try self.code.appendSlice(self.a, try escape.plain(self.a, &self.st, arg));
+                    }
                     try self.code.append(self.a, '\n');
                     return;
                 },
@@ -395,21 +501,21 @@ const Parser = struct {
                 const title = if (args.len > 0) args[0] else "";
                 const section = if (args.len > 1) args[1] else "";
                 const text = try std.fmt.allocPrint(self.a, "{s}({s})", .{ title, section });
-                try self.addRun(h, text, .roman);
+                try self.addText(h, text, true);
             },
             .SH => try self.heading(2, args),
             .SS => try self.heading(3, args),
             .PP, .P, .LP, .HP => self.endGroup(),
-            .TP, .TQ => try self.startTagged(null),
+            .TP, .TQ => try self.startTagged(null, if (args.len > 0) args[0] else null),
             .IP => {
                 if (args.len == 0) {
                     // Plain indented paragraph inside the current group.
                     self.endPara();
                 } else if (isBullet(args[0])) {
                     try self.startBullet();
-                } else try self.startTagged(args[0]);
+                } else try self.startTagged(args[0], if (args.len > 1) args[1] else null);
             },
-            .RS => try self.pushQuote(),
+            .RS => try self.pushQuote(if (args.len > 0) args[0] else null),
             .RE => self.popQuote(),
             .B => try self.singleFont(Font.b, args),
             .I => try self.singleFont(Font.i, args),
@@ -437,15 +543,10 @@ const Parser = struct {
             },
             .TS => {
                 self.endPara();
-                self.nofill = true;
                 self.in_tbl = true;
-                self.tbl_format_done = false;
+                self.tbl_lines.clearRetainingCapacity();
             },
-            .TE => {
-                self.nofill = false;
-                self.in_tbl = false;
-                try self.flushCode();
-            },
+            .TE => {},
             .UR, .MT => {
                 const target = try self.sink();
                 try self.lineSep(target);
@@ -488,30 +589,86 @@ const Parser = struct {
             },
             .de, .am, .de1, .am1, .dei, .ami, .dei1, .ami1 => {
                 // `.de NAME [END]`: the body ends at `..`, or at `.END` if given.
-                self.skip_end = if (args.len > 1) try std.fmt.allocPrint(self.a, ".{s}", .{args[1]}) else "..";
+                const end = if (args.len > 1) try std.fmt.allocPrint(self.a, ".{s}", .{args[1]}) else "..";
+                if (args.len == 0) {
+                    self.skip_end = end;
+                } else {
+                    const is_am = req == .am or req == .am1 or req == .ami or req == .ami1;
+                    self.def = .{ .name = try self.a.dupe(u8, args[0]), .append = is_am, .end = end };
+                }
             },
             .ig => self.skip_end = if (args.len > 0) try std.fmt.allocPrint(self.a, ".{s}", .{args[0]}) else "..",
             .@"if", .ie => try self.conditional(rest, req == .ie),
             .el => try self.elseBranch(rest),
+            .nr => try self.setRegister(args),
+            .rr => if (args.len > 0) {
+                _ = self.st.regs.remove(args[0]);
+            },
             else => {}, // layout requests with no counterpart in the tree
         }
     }
 
-    /// `.if COND body` and `.ie COND body`: only the terminal conditions `n`,
-    /// `t` (and their negations) are evaluated; others count as false.
+    const Cond = struct { truth: bool, rest: []const u8 };
+
+    /// Evaluates the condition at the start of `s` and returns what follows it:
+    /// `n o` true, `t e` false; `d name`, `r name`, `c ch`; a string comparison
+    /// `'a'b'`; or a numeric expression (true when greater than zero).
+    fn evalCond(self: *Parser, s: []const u8) Allocator.Error!Cond {
+        if (s.len == 0) return .{ .truth = false, .rest = "" };
+        const c = s[0];
+        if (std.mem.indexOfScalar(u8, "ntoe", c) != null and (s.len == 1 or !std.ascii.isAlphanumeric(s[1]))) {
+            return .{ .truth = c == 'n' or c == 'o', .rest = s[1..] };
+        }
+        if (std.mem.indexOfScalar(u8, "drc", c) != null and s.len > 1) {
+            // `d name`, `r name` (blanks optional: `rF` is register F).
+            var start: usize = 1;
+            while (start < s.len and (s[start] == ' ' or s[start] == '\t')) start += 1;
+            var end = start;
+            while (end < s.len and s[end] != ' ' and s[end] != '\t') end += 1;
+            const name = s[start..end];
+            const truth = switch (c) {
+                'd' => self.macros.contains(name) or self.st.strings.contains(name),
+                'r' => self.st.regs.contains(name),
+                else => true,
+            };
+            return .{ .truth = truth, .rest = s[end..] };
+        }
+        if (c == '\'' or c == '"') {
+            // 'string1'string2' : equal after expanding strings and registers.
+            const first = std.mem.indexOfScalarPos(u8, s, 1, c) orelse return .{ .truth = false, .rest = "" };
+            const second = std.mem.indexOfScalarPos(u8, s, first + 1, c) orelse return .{ .truth = false, .rest = "" };
+            const left = try escape.interpolate(self.a, &self.st, s[1..first]);
+            const right = try escape.interpolate(self.a, &self.st, s[first + 1 .. second]);
+            return .{ .truth = std.mem.eql(u8, left, right), .rest = s[second + 1 ..] };
+        }
+        const len = expr.tokenLen(s);
+        const text = try escape.interpolate(self.a, &self.st, s[0..len]);
+        const v = expr.eval(text) catch return .{ .truth = false, .rest = s[len..] };
+        return .{ .truth = v > 0, .rest = s[len..] };
+    }
+
+    /// `.if COND body` and `.ie COND body` (see `evalCond`).
     fn conditional(self: *Parser, rest: []const u8, is_ie: bool) Allocator.Error!void {
         var s = rest;
         var negate = false;
-        if (s.len > 0 and s[0] == '!') {
-            negate = true;
+        while (s.len > 0 and s[0] == '!') {
+            negate = !negate;
             s = s[1..];
         }
-        const end = std.mem.indexOfAny(u8, s, " \t") orelse s.len;
-        const cond = s[0..end];
-        var truth = std.mem.eql(u8, cond, "n");
-        if (negate) truth = !truth;
+        const r = try self.evalCond(s);
+        const truth = r.truth != negate;
         if (is_ie) self.last_cond = truth;
-        try self.branch(truth, std.mem.trimStart(u8, s[end..], " \t"));
+        try self.branch(truth, std.mem.trimStart(u8, r.rest, " \t"));
+    }
+
+    /// `.nr name value`: a leading `+` or `-` changes the register by that much.
+    fn setRegister(self: *Parser, args: []const []const u8) Allocator.Error!void {
+        if (args.len < 2) return;
+        const text = try escape.interpolate(self.a, &self.st, args[1]);
+        const relative = text.len > 0 and (text[0] == '+' or text[0] == '-');
+        const v = expr.eval(text) catch return;
+        const old = self.st.regs.get(args[0]) orelse 0;
+        try self.st.regs.put(self.a, try self.a.dupe(u8, args[0]), if (relative) old + v else v);
     }
 
     fn elseBranch(self: *Parser, rest: []const u8) Allocator.Error!void {
@@ -553,8 +710,18 @@ const Parser = struct {
         var l = raw;
         if (l.len > 0 and l[l.len - 1] == '\r') l = l[0 .. l.len - 1];
 
+        if (self.def) |*d| {
+            if (endsDefinition(l, d.end)) {
+                const gop = try self.macros.getOrPut(self.a, d.name);
+                if (d.append and gop.found_existing) {
+                    gop.value_ptr.* = try std.mem.concat(self.a, []const u8, &.{ gop.value_ptr.*, d.lines.items });
+                } else gop.value_ptr.* = d.lines.items;
+                self.def = null;
+            } else try d.lines.append(self.a, try copyMode(self.a, l));
+            return;
+        }
         if (self.skip_end) |end| {
-            if (std.mem.startsWith(u8, l, end)) self.skip_end = null;
+            if (endsDefinition(l, end)) self.skip_end = null;
             return;
         }
         if (self.skip_depth > 0) {
@@ -585,26 +752,204 @@ const Parser = struct {
         try self.textLine(l);
     }
 
+    /// Runs a user macro: its body lines with the arguments filled in.
+    fn callMacro(self: *Parser, name: []const u8, args: []const []const u8) Allocator.Error!void {
+        const body = self.macros.get(name) orelse return;
+        if (self.macro_depth >= max_macro_depth) return;
+        self.macro_depth += 1;
+        defer self.macro_depth -= 1;
+        const saved_args = self.st.regs.get(".$") orelse 0;
+        try self.st.regs.put(self.a, ".$", @intCast(args.len));
+        defer self.st.regs.put(self.a, ".$", saved_args) catch {};
+        for (body) |bl| try self.line(try substArgs(self.a, bl, args));
+    }
+
     fn isRequestInNofill(l: []const u8) bool {
         // Control lines stay requests inside .nf blocks (comments, fonts, .fi ...).
         return l.len > 1 and l[0] == '.' and !std.ascii.isWhitespace(l[1]);
     }
 
-    /// Lines between `.TS` and `.TE`: a format section ending in a line that
-    /// ends with `.`, then rows with tab-separated cells.
+    /// Lines between `.TS` and `.TE` are collected; `.TE` builds the table.
     fn tblLine(self: *Parser, l: []const u8) Allocator.Error!void {
-        if (l.len > 0 and l[0] == '.' and (std.mem.startsWith(u8, l[1..], "TE"))) return self.request(l[1..]);
-        if (!self.tbl_format_done) {
-            if (std.mem.endsWith(u8, std.mem.trimEnd(u8, l, " \t"), ".")) self.tbl_format_done = true;
+        if (std.mem.startsWith(u8, l, ".TE")) {
+            self.in_tbl = false;
+            try self.buildTable();
             return;
         }
-        const t = std.mem.trim(u8, l, " \t");
-        if (t.len == 0 or std.mem.eql(u8, t, "_") or std.mem.eql(u8, t, "=")) return;
-        const plain_text = try escape.plain(self.a, &self.st, l);
-        for (plain_text) |c| try self.code.append(self.a, if (c == '\t') ' ' else c);
-        try self.code.append(self.a, '\n');
+        try self.tbl_lines.append(self.a, l);
+    }
+
+    const ColSpec = struct { letter: u8 = 'l', bold: bool = false, italic: bool = false };
+
+    /// One row format such as `lb r c w(3i)`: a column letter with its modifiers.
+    fn parseFormat(self: *Parser, part: []const u8) Allocator.Error![]const ColSpec {
+        var cols: std.ArrayList(ColSpec) = .empty;
+        var it = std.mem.tokenizeAny(u8, part, " \t");
+        while (it.next()) |tok| {
+            var spec: ColSpec = .{};
+            var started = false;
+            var depth: usize = 0;
+            for (tok) |c| {
+                if (depth > 0) {
+                    if (c == ')') depth -= 1;
+                    continue;
+                }
+                switch (c) {
+                    '(' => depth += 1,
+                    'l', 'L', 'r', 'R', 'c', 'C', 'n', 'N', 'a', 'A', 's', 'S', '^' => if (!started) {
+                        spec.letter = std.ascii.toLower(c);
+                        started = true;
+                    },
+                    'b', 'B' => spec.bold = true,
+                    'i', 'I' => spec.italic = true,
+                    else => {},
+                }
+            }
+            if (started) try cols.append(self.a, spec);
+        }
+        return cols.items;
+    }
+
+    /// Builds a `table` from the collected tbl(1) lines: options, row formats
+    /// (up to a line ending in `.`), then rows of tab separated cells, `_` and
+    /// `=` rules, and `T{ ... T}` text blocks. Boxes and rules are not drawn;
+    /// the first row is a header when a rule follows it or its columns are bold.
+    fn buildTable(self: *Parser) Allocator.Error!void {
+        const lines = self.tbl_lines.items;
+        var i: usize = 0;
+        var tab: u8 = '\t';
+        if (i < lines.len) {
+            const t = std.mem.trim(u8, lines[i], " \t");
+            if (std.mem.endsWith(u8, t, ";")) {
+                if (std.mem.find(u8, t, "tab(")) |p| if (p + 4 < t.len) {
+                    tab = t[p + 4];
+                };
+                i += 1;
+            }
+        }
+
+        var formats: std.ArrayList([]const ColSpec) = .empty;
+        var done = false;
+        while (i < lines.len and !done) : (i += 1) {
+            var fl = std.mem.trim(u8, lines[i], " \t");
+            if (std.mem.endsWith(u8, fl, ".")) {
+                fl = fl[0 .. fl.len - 1];
+                done = true;
+            }
+            var parts = std.mem.splitScalar(u8, fl, ',');
+            while (parts.next()) |part| {
+                const f = try self.parseFormat(part);
+                if (f.len > 0) try formats.append(self.a, f);
+            }
+        }
+        if (formats.items.len == 0) return;
+
+        const tbl = try self.node(.table);
+        var rows: usize = 0;
+        var header_by_rule = false;
+        while (i < lines.len) : (i += 1) {
+            const l = lines[i];
+            const t = std.mem.trim(u8, l, " \t");
+            if (t.len == 0) continue;
+            if (std.mem.eql(u8, t, "_") or std.mem.eql(u8, t, "=")) {
+                if (rows == 1) header_by_rule = true;
+                continue;
+            }
+            if (t[0] == '.') continue; // requests between rows (.sp, .ne)
+
+            const fmt = formats.items[@min(rows, formats.items.len - 1)];
+            const row = try self.node(.table_row);
+            tbl.appendChild(row);
+            var col: usize = 0;
+            var rest: []const u8 = l;
+            while (true) : (col += 1) {
+                const spec = fmt[@min(col, fmt.len - 1)];
+                const cell = try self.node(.table_cell);
+                cell.align_ = switch (spec.letter) {
+                    'r', 'n' => .right,
+                    'c' => .center,
+                    else => .none,
+                };
+                row.appendChild(cell);
+
+                const tab_pos = std.mem.indexOfScalar(u8, rest, tab);
+                const piece = std.mem.trim(u8, if (tab_pos) |p| rest[0..p] else rest, " ");
+                if (std.mem.endsWith(u8, piece, "T{")) {
+                    // A text block runs to the line that starts with `T}`.
+                    var j = i + 1;
+                    const saved_para = self.para;
+                    self.para = cell;
+                    while (j < lines.len and !std.mem.startsWith(u8, std.mem.trim(u8, lines[j], " \t"), "T}")) : (j += 1) {
+                        try self.line(lines[j]);
+                        self.para = cell;
+                    }
+                    self.para = saved_para;
+                    self.st.font = .roman;
+                    self.st.prev = .roman;
+                    if (j >= lines.len) {
+                        i = j;
+                        break;
+                    }
+                    i = j;
+                    const after = std.mem.trimStart(u8, lines[j], " \t")[2..];
+                    if (after.len > 0 and after[0] == tab) {
+                        rest = after[1..];
+                        continue;
+                    }
+                    break;
+                }
+                if (!(std.mem.eql(u8, piece, "\\^") or std.mem.eql(u8, piece, "_") or std.mem.eql(u8, piece, "="))) {
+                    self.st.font = if (spec.bold) Font.b else if (spec.italic) Font.i else Font.roman;
+                    try self.addText(cell, piece, false);
+                    self.st.font = .roman;
+                    self.st.prev = .roman;
+                }
+                if (tab_pos) |p| {
+                    rest = rest[p + 1 ..];
+                } else break;
+            }
+            rows += 1;
+        }
+        if (rows == 0) return;
+        // Rows can have different numbers of cells (spans, short header rows);
+        // the renderer sizes the table from its first row, so pad every row.
+        var widest: usize = 0;
+        var r = tbl.first_child;
+        while (r) |row| : (r = row.next) {
+            var n: usize = 0;
+            var c = row.first_child;
+            while (c) |_| : (c = c.?.next) n += 1;
+            widest = @max(widest, n);
+        }
+        r = tbl.first_child;
+        while (r) |row| : (r = row.next) {
+            var n: usize = 0;
+            var c = row.first_child;
+            while (c) |_| : (c = c.?.next) n += 1;
+            while (n < widest) : (n += 1) row.appendChild(try self.node(.table_cell));
+        }
+        if (tbl.first_child) |first| {
+            var bold_first = true;
+            for (formats.items[0]) |c| if (!c.bold) {
+                bold_first = false;
+            };
+            first.header = header_by_rule or (bold_first and rows > 1);
+        }
+        self.endGroup();
+        self.cur.appendChild(tbl);
     }
 };
+
+/// The line without a trailing `\"` comment (`\\` pairs are skipped).
+fn stripComment(l: []const u8) []const u8 {
+    var i: usize = 0;
+    while (i + 1 < l.len) : (i += 1) {
+        if (l[i] != '\\') continue;
+        if (l[i + 1] == '"') return std.mem.trimEnd(u8, l[0..i], " \t");
+        i += 1; // skip the escaped character
+    }
+    return l;
+}
 
 /// Splits request arguments: blanks separate them, double quotes group (a
 /// doubled quote inside is a literal quote).
@@ -651,9 +996,9 @@ pub fn parse(gpa: Allocator, source: []const u8) Allocator.Error!md.Document {
     root.* = .{ .kind = .document, .line = 1 };
     root.build.open = false;
 
-    var p: Parser = .{ .a = a, .root = root, .container = root, .cur = root };
+    var p: Parser = .{ .a = a, .root = root, .container = root, .cur = root, .st = try escape.State.init(a) };
     var lines = std.mem.splitScalar(u8, source, '\n');
-    while (lines.next()) |l| try p.line(l);
+    while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
     try p.flushCode();
     return .{ .arena = arena, .root = root };
 }

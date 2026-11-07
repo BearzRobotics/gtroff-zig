@@ -18,7 +18,7 @@ int main(void) {
 
     CHECK(gtroff_man_to_text((const uint8_t *)page, strlen(page), 60, 0, &out, &n) == GTROFF_OK);
     CHECK(contains(out, n, "ls - list **directory** contents"));
-    CHECK(contains(out, n, "**-a**\n    all"));
+    CHECK(contains(out, n, "**-a** all"));
     gtroff_free_string(out, n);
 
     CHECK(gtroff_man_to_html((const uint8_t *)page, strlen(page), &out, &n) == GTROFF_OK);
@@ -40,7 +40,7 @@ int main(void) {
     CHECK(out == NULL && n == 0);
     CHECK(gtroff_man_to_text((const uint8_t *)"x", 1, 0, 0, NULL, &n) == GTROFF_ERR_INVALID_ARGUMENT);
     gtroff_free_string(NULL, 0);
-    CHECK(strcmp(gtroff_version(), "0.2.1") == 0);
+    CHECK(strcmp(gtroff_version(), "0.3.0") == 0);
     if (fails == 0) printf("c api ok\n");
     return fails ? 1 : 0;
 }

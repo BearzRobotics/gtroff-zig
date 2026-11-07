@@ -89,6 +89,7 @@ const Callable = enum {
     Qo,
     Qq,
     Sc,
+    Sm,
     So,
     Sq,
     St,
@@ -159,6 +160,8 @@ const Ctx = struct {
     /// Where blocks were added before the list started.
     parent: *Node,
     item_open: bool = false,
+    /// Columns for the tag of a `-tag` list (`-width`).
+    width: u16 = 6,
 };
 
 const Reference = struct {
@@ -206,6 +209,10 @@ const Parser = struct {
     code: std.ArrayList(u8) = .empty,
     xo: ?std.ArrayList(Word) = null,
     xo_depth: usize = 0,
+    /// The joined `.Xo` line began with `.Xo` itself: its words are text, not a macro line.
+    xo_inline: bool = false,
+    /// `.Sm off` removes the spaces between words until `.Sm on`.
+    spacing: bool = true,
     rs: ?Reference = null,
     line_no: u32 = 0,
 
@@ -247,7 +254,7 @@ const Parser = struct {
     /// attached (after an opening bracket).
     fn emit(self: *Parser, text: []const u8, font: Font, glue_before: bool, glue_after: bool) Allocator.Error!void {
         if (text.len == 0) return;
-        const lead = self.space and !glue_before;
+        const lead = self.space and !glue_before and self.spacing;
         const f: Font = if (font.eql(.roman)) self.base_font else font;
         if (self.last_leaf) |leaf| {
             if (self.target.last_child == self.last_top and self.last_font.eql(f)) {
@@ -407,7 +414,21 @@ const Parser = struct {
                 try self.styled(Font.cw, args, "");
                 try self.emit("\u{2019}", .roman, true, false);
             },
-            .Ev, .Er, .Dv, .Ms, .Tn, .An, .Sx, .No => try self.styled(.roman, args, ""),
+            .An => {
+                // `.An -split` and `-nosplit` only say how to break lines.
+                var keep = args;
+                while (keep.len > 0 and (std.mem.eql(u8, keep[0].text, "-split") or std.mem.eql(u8, keep[0].text, "-nosplit"))) keep = keep[1..];
+                try self.styled(.roman, keep, "");
+            },
+            .Sm => {
+                if (args.len > 0) {
+                    if (std.mem.eql(u8, args[0].text, "off")) self.spacing = false;
+                    if (std.mem.eql(u8, args[0].text, "on")) self.spacing = true;
+                    return start + 1;
+                }
+                self.spacing = !self.spacing;
+            },
+            .Ev, .Er, .Dv, .Ms, .Tn, .Sx, .No => try self.styled(.roman, args, ""),
             .Ok, .Fr, .En, .Es, .Eo, .Ec, .Ud => {},
 
             // Spacing.
@@ -601,13 +622,29 @@ const Parser = struct {
 
     // ---- block macros ---------------------------------------------------------
 
+    const body_indent: u16 = 7;
+    const sub_indent: u16 = 3;
+
     fn heading(self: *Parser, level: u8, args: []const Word) Allocator.Error!void {
         try self.closeAllLists();
         self.endPara();
-        self.cur = self.root;
         const h = try self.node(.heading);
         h.level = level;
-        self.root.appendChild(h);
+        // Same layout as man pages: `.Sh` body indented 7, `.Ss` heading at 3.
+        const body = try self.node(.block_quote);
+        if (level == 3) {
+            const head_quote = try self.node(.block_quote);
+            head_quote.indent = sub_indent;
+            self.root.appendChild(head_quote);
+            head_quote.appendChild(h);
+            body.indent = body_indent - sub_indent;
+            head_quote.appendChild(body);
+        } else {
+            self.root.appendChild(h);
+            body.indent = body_indent;
+            self.root.appendChild(body);
+        }
+        self.cur = body;
         const text = try self.joinWords(args);
         try self.addRun(h, text, .roman);
         if (level == 2) {
@@ -637,6 +674,16 @@ const Parser = struct {
             if (std.mem.eql(u8, w.text, "-enum")) kind = .enumerated;
             if (std.mem.eql(u8, w.text, "-column")) kind = .column;
         }
+        var width: u16 = 6;
+        for (args, 0..) |w, k| {
+            if (!std.mem.eql(u8, w.text, "-width") or k + 1 >= args.len) continue;
+            const arg = args[k + 1].text;
+            if (escape.columns(arg)) |c| {
+                width = c;
+            } else if (std.mem.eql(u8, arg, "Ds")) {
+                width = 8;
+            } else width = @intCast(@min(@max(arg.len + 1, 4), 30));
+        }
         const list = switch (kind) {
             .tag => blk: {
                 const d = try self.node(.deflist);
@@ -654,7 +701,7 @@ const Parser = struct {
             .column => try self.node(.table),
         };
         self.cur.appendChild(list);
-        self.stack[self.depth] = .{ .kind = kind, .list = list, .parent = self.cur };
+        self.stack[self.depth] = .{ .kind = kind, .list = list, .parent = self.cur, .width = width };
         self.depth += 1;
     }
 
@@ -667,6 +714,7 @@ const Parser = struct {
             .tag => {
                 const term = try self.node(.deflist_term);
                 const def = try self.node(.deflist_def);
+                def.indent = ctx.width;
                 ctx.list.appendChild(term);
                 ctx.list.appendChild(def);
                 self.cur = def;
@@ -710,6 +758,7 @@ const Parser = struct {
         if (self.code.items.len == 0) return;
         const b = try self.node(.code_block);
         b.literal = try self.a.dupe(u8, self.code.items);
+        b.indent = Node.flush;
         self.cur.appendChild(b);
         self.code.clearRetainingCapacity();
     }
@@ -834,13 +883,13 @@ const Parser = struct {
     }
 
     /// One macro or text line, already split into words (and without the dot).
-    fn lineWords(self: *Parser, words: []const Word) Allocator.Error!void {
+    fn lineWords(self: *Parser, words: []const Word, from_xo: bool) Allocator.Error!void {
         if (words.len == 0) return;
         const first = words[0];
-        if (!first.quoted) {
+        if (!first.quoted and !from_xo) {
             if (std.meta.stringToEnum(Block, first.text)) |b| return self.block(b, words[1..]);
         }
-        if (isCallable(first)) {
+        if (isCallable(first) or from_xo) {
             if (self.bd_literal) {
                 const text = try self.plainOf(words);
                 try self.code.appendSlice(self.a, text);
@@ -861,7 +910,12 @@ const Parser = struct {
 
     fn block(self: *Parser, b: Block, args: []const Word) Allocator.Error!void {
         switch (b) {
-            .Dd, .Os, .Db, .Sm, .Bk, .Ek, .Hf, .Tg => {},
+            .Sm => {
+                if (args.len > 0 and std.mem.eql(u8, args[0].text, "off")) self.spacing = false;
+                if (args.len > 0 and std.mem.eql(u8, args[0].text, "on")) self.spacing = true;
+                if (args.len == 0) self.spacing = !self.spacing;
+            },
+            .Dd, .Os, .Db, .Bk, .Ek, .Hf, .Tg => {},
             .Dt => {
                 try self.closeAllLists();
                 self.endPara();
@@ -962,38 +1016,49 @@ const Parser = struct {
 
         // `.Xo` ... `.Xc` joins several lines into one macro line.
         if (self.xo != null) {
-            const w = if (is_macro) words else try splitWords(self.a, l);
-            var depth_closed = false;
-            if (is_macro and w.len > 0 and std.mem.eql(u8, w[0].text, "Xc")) {
-                depth_closed = true;
-                if (self.xo_depth > 1) self.xo_depth -= 1 else {
-                    self.xo_depth = 0;
+            // A section heading ends an unterminated `.Xo`.
+            if (is_macro and words.len > 0 and (std.mem.eql(u8, words[0].text, "Sh") or std.mem.eql(u8, words[0].text, "Ss"))) {
+                const joined = self.xo.?.items;
+                self.xo = null;
+                try self.lineWords(joined, self.xo_inline);
+            } else {
+                const w = if (is_macro) words else try splitWords(self.a, l);
+                if (is_macro and w.len > 0 and std.mem.eql(u8, w[0].text, "Xc")) {
+                    self.xo_depth -|= 1;
+                    if (self.xo_depth == 0) {
+                        const joined = self.xo.?.items;
+                        self.xo = null;
+                        try self.lineWords(joined, self.xo_inline);
+                        return;
+                    }
                 }
-            }
-            if (!depth_closed or self.xo_depth > 0) {
                 for (w) |x| {
                     if (!x.quoted and std.mem.eql(u8, x.text, "Xo")) self.xo_depth += 1;
                     try self.xo.?.append(self.a, x);
                 }
-                if (depth_closed) return;
                 return;
             }
-            const joined = self.xo.?.items;
-            self.xo = null;
-            try self.lineWords(joined);
-            return;
         }
         if (is_macro) {
             for (words, 0..) |w, i| {
-                if (!w.quoted and std.mem.eql(u8, w.text, "Xo")) {
-                    var acc: std.ArrayList(Word) = .empty;
-                    for (words, 0..) |x, j| if (j != i) try acc.append(self.a, x);
-                    self.xo = acc;
-                    self.xo_depth = 1;
-                    return;
+                if (w.quoted or !std.mem.eql(u8, w.text, "Xo")) continue;
+                // `.Xo ... Xc` on one line is just that line without the pair.
+                var close: ?usize = null;
+                for (words[i + 1 ..], i + 1..) |x, j| {
+                    if (!x.quoted and std.mem.eql(u8, x.text, "Xc")) close = j;
                 }
+                var acc: std.ArrayList(Word) = .empty;
+                for (words, 0..) |x, j| {
+                    if (j == i or (close != null and j == close.?)) continue;
+                    try acc.append(self.a, x);
+                }
+                if (close != null) return self.lineWords(acc.items, i == 0);
+                self.xo = acc;
+                self.xo_depth = 1;
+                self.xo_inline = i == 0;
+                return;
             }
-            try self.lineWords(words);
+            try self.lineWords(words, false);
             return;
         }
         try self.textLine(l);
@@ -1100,7 +1165,7 @@ pub fn parse(gpa: Allocator, source: []const u8) Allocator.Error!md.Document {
 
     var p: Parser = .{ .a = a, .root = root, .cur = root, .target = root };
     var lines = std.mem.splitScalar(u8, source, '\n');
-    while (lines.next()) |l| try p.line(l);
+    while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
     try p.endReference();
     try p.flushCode();
     return .{ .arena = arena, .root = root };

@@ -47,6 +47,17 @@ pub const State = struct {
     font: Font = .roman,
     prev: Font = .roman,
     strings: std.StringHashMapUnmanaged([]const u8) = .empty,
+    /// Number registers (`.nr`, `\\n[x]`).
+    regs: std.StringHashMapUnmanaged(i64) = .empty,
+
+    /// A state with the registers and strings groff predefines that pages test.
+    pub fn init(a: Allocator) Allocator.Error!State {
+        var st: State = .{};
+        try st.regs.put(a, ".g", 1); // groff
+        try st.regs.put(a, ".$", 0);
+        try st.strings.put(a, ".T", "utf8");
+        return st;
+    }
 
     pub fn setFont(self: *State, f: Font) void {
         self.prev = self.font;
@@ -189,8 +200,25 @@ pub fn segments(a: Allocator, st: *State, line: []const u8) Allocator.Error!Resu
                     try buf.appendSlice(a, v);
                 }
             },
-            'n', '$' => {
-                // Number registers and macro arguments: not supported, dropped.
+            'n' => {
+                // `\n[x]`, `\n(xx`, `\nx`; a `+` or `-` first changes the register.
+                var delta: i64 = 0;
+                if (i < line.len and (line[i] == '+' or line[i] == '-')) {
+                    delta = if (line[i] == '+') 1 else -1;
+                    i += 1;
+                }
+                const nm = readName(line[i..]) orelse break;
+                i += nm.used;
+                if (delta != 0) {
+                    const gop = try st.regs.getOrPut(a, nm.name);
+                    if (!gop.found_existing) gop.value_ptr.* = 0;
+                    gop.value_ptr.* += delta;
+                }
+                const v = st.regs.get(nm.name) orelse 0;
+                try buf.print(a, "{d}", .{v});
+            },
+            '$' => {
+                // Macro arguments are replaced before text is parsed; a stray one is dropped.
                 const nm = readName(line[i..]) orelse break;
                 i += nm.used;
             },
@@ -201,7 +229,10 @@ pub fn segments(a: Allocator, st: *State, line: []const u8) Allocator.Error!Resu
                 var digits: usize = 0;
                 while (i < line.len and std.ascii.isDigit(line[i]) and digits < 2) : (digits += 1) i += 1;
             },
-            'm', 'M', 'k', 'z', 'Z', 'b', 'o', 'w', 'X', 'v', 'h', 'l', 'L', 'D', 'H', 'S', 'C', 'N', 'R', 'x', 'p', 'r', 'u', 'd', 't', 'a' => {
+            // Superscript, subscript, reverse motion and similar take no argument.
+            'u', 'd', 'r', 'p', 'a' => {},
+            't' => try buf.append(a, ' '),
+            'm', 'M', 'k', 'z', 'Z', 'b', 'o', 'w', 'X', 'v', 'h', 'l', 'L', 'D', 'H', 'S', 'C', 'N', 'R', 'x' => {
                 // Drawing, motion and other typesetting escapes with a quoted
                 // or named argument. Skip the argument so it is not printed.
                 if (i < line.len and (line[i] == '\'')) {
@@ -225,6 +256,89 @@ fn flush(a: Allocator, out: *std.ArrayList(Segment), buf: *std.ArrayList(u8), fo
     buf.clearRetainingCapacity();
 }
 
+/// A roff length such as `7`, `4n`, `0.5i` or `3.5` as a number of terminal
+/// columns (n and m count one column, an inch ten, a centimetre four). Returns
+/// null if `s` does not start with a number.
+pub fn columns(s: []const u8) ?u16 {
+    var end: usize = 0;
+    while (end < s.len and (std.ascii.isDigit(s[end]) or s[end] == '.')) end += 1;
+    if (end == 0) return null;
+    const v = std.fmt.parseFloat(f32, s[0..end]) catch return null;
+    const unit: f32 = if (end < s.len) switch (s[end]) {
+        'i' => 10,
+        'c' => 4,
+        'u' => 1.0 / 24.0,
+        'p' => 1.0 / 7.2,
+        else => 1,
+    } else 1;
+    const cols = @round(v * unit);
+    return if (cols < 0 or cols > 60) 60 else @intFromFloat(cols);
+}
+
+/// The next input line, with `\`-newline continuations joined: a line that ends
+/// in an odd number of backslashes continues on the next one.
+pub fn nextLogicalLine(a: Allocator, lines: *std.mem.SplitIterator(u8, .scalar)) Allocator.Error!?[]const u8 {
+    var line = lines.next() orelse return null;
+    if (!endsWithContinuation(line)) return line;
+    var buf: std.ArrayList(u8) = .empty;
+    while (true) {
+        try buf.appendSlice(a, line[0 .. line.len - 1]);
+        line = lines.next() orelse break;
+        if (!endsWithContinuation(line)) {
+            try buf.appendSlice(a, line);
+            break;
+        }
+    }
+    return buf.items;
+}
+
+fn endsWithContinuation(line: []const u8) bool {
+    var n: usize = 0;
+    while (n < line.len and line[line.len - 1 - n] == '\\') n += 1;
+    return n % 2 == 1;
+}
+
+/// `s` with the number registers and strings it names replaced (`\\n[x]`,
+/// `\\*[x]`); everything else is left as it is. Used on conditions and
+/// `.nr` values, where other escapes do not matter.
+pub fn interpolate(a: Allocator, st: *State, s: []const u8) Allocator.Error![]const u8 {
+    if (std.mem.indexOfScalar(u8, s, '\\') == null) return s;
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < s.len) {
+        if (s[i] == '\\' and i + 1 < s.len and (s[i + 1] == 'n' or s[i + 1] == '*')) {
+            var j = i + 2;
+            var delta: i64 = 0;
+            if (s[i + 1] == 'n' and j < s.len and (s[j] == '+' or s[j] == '-')) {
+                delta = if (s[j] == '+') 1 else -1;
+                j += 1;
+            }
+            const nm = readName(s[j..]) orelse {
+                try out.append(a, s[i]);
+                i += 1;
+                continue;
+            };
+            if (s[i + 1] == 'n') {
+                if (delta != 0) {
+                    const gop = try st.regs.getOrPut(a, nm.name);
+                    if (!gop.found_existing) gop.value_ptr.* = 0;
+                    gop.value_ptr.* += delta;
+                }
+                try out.print(a, "{d}", .{st.regs.get(nm.name) orelse 0});
+            } else if (st.strings.get(nm.name)) |v| {
+                try out.appendSlice(a, v);
+            } else if (builtinString(nm.name)) |v| {
+                try out.appendSlice(a, v);
+            }
+            i = j + nm.used;
+            continue;
+        }
+        try out.append(a, s[i]);
+        i += 1;
+    }
+    return out.items;
+}
+
 /// The text of a line with no font information.
 pub fn plain(a: Allocator, st: *State, line: []const u8) Allocator.Error![]u8 {
     const r = try segments(a, st, line);
@@ -245,6 +359,20 @@ test "fonts, specials and drops" {
     try std.testing.expectEqualStrings(" \u{2014} -xy \\ small \u{00e9}", r.segments[2].text);
 }
 
+test "registers: \\n[x], \\n(xx, \\nx and auto-increment" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    var st = try State.init(a);
+    try st.regs.put(a, "xy", 5);
+    try st.regs.put(a, "long-name", 7);
+    try st.regs.put(a, "q", 2);
+    const r = try segments(a, &st, "a\\n(xy b\\n[long-name] c\\nq d\\n+q e\\nq f\\n[none]");
+    try std.testing.expectEqualStrings("a5 b7 c2 d3 e3 f0", r.segments[0].text);
+    try std.testing.expectEqualStrings("1", try interpolate(a, &st, "\\n(.g"));
+    try std.testing.expectEqualStrings("utf8=utf8", try interpolate(a, &st, "utf8=\\*[.T]"));
+}
+
 test "\\fP returns to the previous font and fonts persist across lines" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
@@ -254,4 +382,14 @@ test "\\fP returns to the previous font and fonts persist across lines" {
     try std.testing.expect(st.font.bold);
     _ = try segments(a, &st, "x\\fP");
     try std.testing.expect(st.font.italic and !st.font.bold);
+}
+
+test "columns" {
+    try std.testing.expectEqual(@as(?u16, 7), columns("7"));
+    try std.testing.expectEqual(@as(?u16, 4), columns("4n"));
+    try std.testing.expectEqual(@as(?u16, 5), columns("0.5i"));
+    try std.testing.expectEqual(@as(?u16, 4), columns("3.5"));
+    try std.testing.expectEqual(@as(?u16, 0), columns("0.0"));
+    try std.testing.expectEqual(@as(?u16, null), columns("abc"));
+    try std.testing.expectEqual(@as(?u16, 60), columns("999"));
 }

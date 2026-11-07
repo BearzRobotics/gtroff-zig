@@ -34,21 +34,20 @@ test "a small page" {
         \\
         \\## NAME
         \\
-        \\ls - list **directory** contents
+        \\       ls - list **directory** contents
         \\
         \\## SYNOPSIS
         \\
-        \\**ls** [_option_]...
+        \\       **ls** [_option_]...
         \\
         \\## OPTIONS
         \\
-        \\**-a**, **--all**
-        \\    do not ignore entries starting with .
+        \\       **-a**, **--all**
+        \\              do not ignore entries starting with .
         \\
-        \\**-l**
-        \\    use a long listing format
+        \\       **-l** use a long listing format
         \\
-        \\After the list.
+        \\       After the list.
         \\
     , out);
 }
@@ -72,7 +71,7 @@ test "code blocks, bullets, indents, links and conditionals" {
         \\.if t .SS Typeset only
         \\.ie n plain terminal
         \\.el typeset
-        \\.if \n(.g \{\
+        \\.if \n(.zz \{\
         \\.SS Skipped block
         \\.\}
         \\see
@@ -85,17 +84,17 @@ test "code blocks, bullets, indents, links and conditionals" {
     try testing.expectEqualStrings(
         \\## EXAMPLES
         \\
-        \\    $ ls -l
-        \\      total 0
+        \\       $ ls -l
+        \\         total 0
         \\
-        \\• first
-        \\• second
+        \\       • first
+        \\       • second
         \\
-        \\│ indented
+        \\              indented
         \\
-        \\Terminal only
+        \\   Terminal only
         \\
-        \\plain terminal see the site <http://example.com>.
+        \\       plain terminal see the site <http://example.com>.
         \\
     , out);
 }
@@ -103,7 +102,7 @@ test "code blocks, bullets, indents, links and conditionals" {
 test "headings without arguments take the next line; \\c joins lines" {
     const out = try text(".SH\nSEE ALSO\nfoo\\c\nbar\n");
     defer testing.allocator.free(out);
-    try testing.expectEqualStrings("## SEE ALSO\n\nfoobar\n", out);
+    try testing.expectEqualStrings("## SEE ALSO\n\n       foobar\n", out);
 }
 
 test "malformed input does not crash" {
@@ -156,17 +155,17 @@ test "mdoc: prologue, name, synopsis, inline macros" {
         \\
         \\## NAME
         \\
-        \\**ls** — list directory contents
+        \\       **ls** — list directory contents
         \\
         \\## SYNOPSIS
         \\
-        \\**ls** [**-al**] [**--color**=_when_] [_file ..._]
+        \\       **ls** [**-al**] [**--color**=_when_] [_file ..._]
         \\
         \\## DESCRIPTION
         \\
-        \\The **ls** utility lists files, see stat(2), and _/etc/passwd_.
+        \\       The **ls** utility lists files, see stat(2), and _/etc/passwd_.
         \\
-        \\Second “quoted text” paragraph.
+        \\       Second “quoted text” paragraph.
         \\
     , out);
 }
@@ -210,28 +209,27 @@ test "mdoc: lists, displays, functions and references" {
         \\
         \\## OPTIONS
         \\
-        \\**-a**
-        \\    show all
+        \\       **-a**  show all
         \\
-        \\**-b** _n_
-        \\    bytes
+        \\       **-b** _n_
+        \\               bytes
         \\
-        \\• one
-        \\• two
+        \\       • one
+        \\       • two
         \\
-        \\    $ cmd  arg
+        \\       $ cmd  arg
         \\
-        \\    $ run it
+        \\       $ run it
         \\
         \\## SEE ALSO
         \\
-        \\**open**(_const char *path_, _int flags_)
+        \\       **open**(_const char *path_, _int flags_)
         \\
-        \\A. Author, A Title, 1999.
+        \\       A. Author, A Title, 1999.
         \\
         \\## STANDARDS
         \\
-        \\IEEE Std 1003.1-2008 (“POSIX.1”)
+        \\       IEEE Std 1003.1-2008 (“POSIX.1”)
         \\
     , out);
 }
@@ -266,5 +264,137 @@ test "macro definitions are skipped (rst2man style, custom end marker)" {
         \\
     );
     defer testing.allocator.free(out);
-    try testing.expectEqualStrings("## NAME\n\nshown\n", out);
+    try testing.expectEqualStrings("## NAME\n\n       shown\n", out);
+}
+
+test "tbl tables: formats, rules, text blocks" {
+    const out = try text(".TS\nallbox;\nlb rb\nl n.\nName\tCount\n_\napple\t12\nT{\n.BR fputc (),\nsecond line\nT}\t7\n.TE\nafter\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "Name") != null);
+    try testing.expect(std.mem.find(u8, out, "apple") != null);
+    try testing.expect(std.mem.find(u8, out, "**fputc**(), second line") != null);
+    try testing.expect(std.mem.find(u8, out, ".BR") == null);
+    try testing.expect(std.mem.find(u8, out, "T{") == null);
+    try testing.expect(std.mem.find(u8, out, "after") != null);
+}
+
+test "user macros with arguments, redefinition by .am, and line continuation" {
+    const out = try text(
+        \\.de1 Note
+        \\.PP
+        \\.B Note:
+        \\\\$1 and \\$2 (\\$#)
+        \\..
+        \\.am Note
+        \\more
+        \\..
+        \\.Note first "second arg"
+        \\joined \
+        \\line
+        \\
+    );
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("**Note:** first and second arg (2) more joined line\n", out);
+}
+
+test "a macro may call itself only a bounded number of times" {
+    const out = try text(".de Loop\n.Loop\nx\n..\n.Loop\ndone\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "done") != null);
+}
+
+test "font macros inside no-fill blocks keep their spaces" {
+    const out = try text(".nf\n.B int f(char *\\fIp\\fP,\n.BR a b\n.fi\n");
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("int f(char *p,\nab\n", out);
+}
+
+test "title escapes and superscript markers" {
+    const out = try text(".TH FOO\\-BAR\\&.D 5\n.SH NAME\nSection 4.4\\&\\s-2\\u[1]\\d\\s+2 end\n");
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("# FOO-BAR.D(5)\n\n## NAME\n\n       Section 4.4[1] end\n", out);
+}
+
+test "a comment after a request is not an argument" {
+    const out = try text(".de Sp \\\" Vertical space\n.sp\n..\n.SH NAME\none\n.Sp\ntwo\n.SH MORE\nthree\n");
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("## NAME\n\n       one\n\n       two\n\n## MORE\n\n       three\n", out);
+}
+
+test "tbl rows of different lengths are padded to the widest" {
+    const out = try text(".TS\ntab(|);\nl s l\nl l l.\nTop|X\na|b|c\n.TE\n");
+    defer testing.allocator.free(out);
+    // All three columns of the second row survive although the first row is short.
+    try testing.expect(std.mem.find(u8, out, "c") != null);
+    try testing.expect(std.mem.find(u8, out, "b") != null);
+}
+
+test "mdoc: Xo and Xc on one line, and an unterminated Xo ends at the next section" {
+    const out = try mdocText(
+        \\.Dd today
+        \\.Dt T 1
+        \\.Os
+        \\.Sh DESCRIPTION
+        \\Given twice
+        \\.Xo ( Fl CC ) Xc
+        \\disables echo.
+        \\.Sh MORE
+        \\.It Xo
+        \\.Fl a
+        \\.Sh LAST
+        \\kept
+        \\
+    );
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "Given twice (**-CC**) disables echo.") != null);
+    try testing.expect(std.mem.find(u8, out, "## LAST") != null);
+    try testing.expect(std.mem.find(u8, out, "kept") != null);
+}
+
+test "mdoc: Sm off glues words, An -nosplit is not printed" {
+    const out = try mdocText(".Dd d\n.Dt T 1\n.Os\n.Sh SYNOPSIS\n.Op Fl L Sm off Ar port : Ar host Sm on\n.Sh AUTHORS\n.An -nosplit\n.An Jane Doe\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "_port_:_host_") != null or std.mem.find(u8, out, "_port:host_") != null);
+    try testing.expect(std.mem.find(u8, out, "nosplit") == null);
+    try testing.expect(std.mem.find(u8, out, "Jane Doe") != null);
+}
+
+test "registers and conditions: arithmetic, strings, d and r tests, argument count" {
+    const out = try text(
+        \\.nr a 3
+        \\.nr a +2
+        \\.nr b \na*2
+        \\.if \na==5 five
+        \\.if \nb>=10 ten
+        \\.if \nb>10 never
+        \\.if !\na==4 not-four
+        \\.ie 'x'x' same
+        \\.el different
+        \\.ie 'x'y' wrong
+        \\.el other
+        \\.ds S str
+        \\.if '\*S'str' interpolated
+        \\.if d S defined
+        \\.if r a reg
+        \\.if r zz noreg
+        \\.if \n(.g groff
+        \\.if '\*[.T]'utf8' utf8
+        \\.de M
+        \\.if \n(.$>1 many
+        \\.if \n(.$==1 one
+        \\..
+        \\.M x
+        \\.M x y
+        \\.rr a
+        \\.if r a gone
+        \\
+    );
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("five ten not-four same other interpolated defined reg groff\nutf8 one many\n", out);
+}
+
+test "a definition may end with dot, blanks, dot (Asciidoctor)" {
+    const out = try text(".if \\n[.g] \\{\\\n.  am URL\n.    ad l\n.  .\n.  am MTO\n.    ad l\n.  .\n.\\}\n.SH NAME\nkept\n");
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("## NAME\n\n       kept\n", out);
 }

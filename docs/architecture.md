@@ -16,11 +16,11 @@
 | `.TH t s` | heading level 1 `t(s)` |
 | `.SH`, `.SS` | heading level 2, 3 (argument or the next line) |
 | `.PP .P .LP .HP`, blank line | ends the paragraph |
-| `.TP`, `.TQ`, `.IP tag` | `deflist` with `deflist_term` and `deflist_def` (loose) |
+| `.TP [n]`, `.TQ`, `.IP tag [n]` | `deflist` with `deflist_term` and `deflist_def` (loose); the def gets `indent` = n (default 7), so a short tag shares a line with its text |
 | `.IP \(bu` | bullet `list` with `item`s |
-| `.RS` / `.RE` | `block_quote` (nested up to 16 deep) |
+| `.RS n` / `.RE` | `block_quote` with `indent` = n columns (nested up to 16 deep; `.RS 0` adds none) |
 | `.nf`/`.fi`, `.EX`/`.EE` | `code_block` |
-| `.TS`/`.TE` | `code_block` of the data rows; cells separated by blanks, the tbl format section is dropped |
+| `.TS`/`.TE` | `table`: column letters give alignment (`l r c n`) and bold/italic, `T{ T}` blocks are cells of formatted text, the first row is the header when a `_` rule follows it or its columns are bold; boxes and rules are not drawn; short rows are padded |
 | `.B .I .BR .BI ...`, `\fB \fI` | `strong`, `emph` (nested for bold italic); constant width becomes `code` |
 | `.UR/.UE`, `.MT/.ME` | `link` |
 | `.br` | `linebreak` |
@@ -50,10 +50,34 @@ the previous one, `\&` makes a name literal. `.Xo`/`.Xc` join lines. In SYNOPSIS
 Not supported: `.Sm`/`.Db` spacing modes, `.Bk`, `-width`/`-offset`/`-compact`,
 `.Eo`/`.Ec`, `.Hf`, `.Tg`; unknown macros are ignored.
 
+## User macros
+
+`.de`, `.am` and their variants (`.de1`, `.dei`, ...) store the body in copy mode
+(`\\` becomes `\`); a later `.NAME args` runs it with `\$1`..`\$9`, `\$*` and
+`\$#` replaced. Built-in requests take precedence over user macros of the same
+name, nesting is limited to 16 calls, and `.ig` blocks are skipped.
+
+## Registers and conditions
+
+`.nr name value` (a leading `+`/`-` is relative), `.rr`, and `\n[x]`, `\n(xx`,
+`\nx`, `\n+x` are evaluated. `.if`/`.ie` accept `n o` (true), `t e` (false), `d name`,
+`r name`, `c ch`, `'a'b'` string comparison and numeric expressions (true when
+greater than zero), with `!`. Expressions (`expr.zig`) are evaluated left to
+right without precedence, as in roff; units are dropped. Predefined: `.g` = 1
+(groff), `.$` = argument count of the running macro, string `.T` = `utf8`.
+
+## Section layout
+
+Each `.SH` heading is followed by a `block_quote` with `indent` 7 holding the
+section body; `.SS` puts its heading in a quote of 3 and its body in a nested
+quote of 4. Code blocks from `.nf`/`.EX` are flush with the surrounding indent.
+mdoc uses the same layout.
+
 ## Known losses
 
-The tree has no exact indentation, tab stops, column layout, page headers or
-footers. Indents (`.RS`, `.TP` widths) are reduced to quote levels and a fixed
-definition indent. Macros defined with `.de`/`.am` are skipped, including their
-uses; only `n`/`t` conditions are evaluated (`n` true, `t` false, anything else
-false); `.so` is ignored; number registers are dropped.
+The tree has no tab stops, page headers or footers, and text is not justified
+(groff justifies). Indents are columns taken from `.TP`/`.IP`/`.RS` and mdoc
+`-width`; other indent requests (`.in`, `.ti`, `.ll`) are ignored, as are `.ft`
+and diversions. `.so` is ignored by the library (dkman follows redirects). Boxes
+and rules of tbl tables are not drawn. Hanging indents of wrapped synopsis lines
+are not reproduced.

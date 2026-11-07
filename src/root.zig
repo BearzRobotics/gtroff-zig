@@ -8,6 +8,7 @@ const Allocator = std.mem.Allocator;
 pub const escape = @import("escape.zig");
 pub const man = @import("man.zig");
 pub const mdoc = @import("mdoc.zig");
+pub const expr = @import("expr.zig");
 
 /// Parses a man(7) page into an md-zig document (see `man.zig`).
 pub const parseMan = man.parse;
@@ -19,5 +20,6 @@ test {
     _ = @import("escape.zig");
     _ = @import("man.zig");
     _ = @import("mdoc.zig");
+    _ = @import("expr.zig");
     _ = @import("tests.zig");
 }
