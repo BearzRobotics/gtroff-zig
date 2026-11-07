@@ -108,8 +108,9 @@ test "headings without arguments take the next line; \\c joins lines" {
 
 test "malformed input does not crash" {
     const inputs = [_][]const u8{
-        ".TH", ".SH \"unterminated", ".TP\n.TP\n.TP", ".RE\n.RE", ".if n \\{\\\n.SH x", ".de X\nnever ends",
-        "\\", "\\f", "\\(", "\\[", "\\[u", ".nf\nopen", ".TS\nrow\tx", ".UR\n.UE", ".IP", ".\\\"", "\\s", "\\*",
+        ".TH",         ".SH \"unterminated", ".TP\n.TP\n.TP", ".RE\n.RE", ".if n \\{\\\n.SH x", ".de X\nnever ends",
+        "\\",          "\\f",                "\\(",           "\\[",      "\\[u",               ".nf\nopen",
+        ".TS\nrow\tx", ".UR\n.UE",           ".IP",           ".\\\"",    "\\s",                "\\*",
     };
     for (inputs) |src| {
         const out = try text(src);
