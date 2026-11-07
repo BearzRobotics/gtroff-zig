@@ -40,7 +40,7 @@ int main(void) {
     CHECK(out == NULL && n == 0);
     CHECK(gtroff_man_to_text((const uint8_t *)"x", 1, 0, 0, NULL, &n) == GTROFF_ERR_INVALID_ARGUMENT);
     gtroff_free_string(NULL, 0);
-    CHECK(strcmp(gtroff_version(), "0.2.0") == 0);
+    CHECK(strcmp(gtroff_version(), "0.2.1") == 0);
     if (fails == 0) printf("c api ok\n");
     return fails ? 1 : 0;
 }

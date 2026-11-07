@@ -44,7 +44,8 @@ const Parser = struct {
     code: std.ArrayList(u8) = .empty,
     in_tbl: bool = false,
     tbl_format_done: bool = false,
-    skip_until_dotdot: bool = false,
+    /// While skipping a macro definition or `.ig` block: the line that ends it.
+    skip_end: ?[]const u8 = null,
     skip_depth: usize = 0,
     last_cond: bool = false,
     continued: bool = false,
@@ -316,6 +317,12 @@ const Parser = struct {
         de,
         am,
         ig,
+        de1,
+        am1,
+        dei,
+        ami,
+        dei1,
+        ami1,
         @"if",
         ie,
         el,
@@ -479,7 +486,11 @@ const Parser = struct {
                     try self.st.strings.put(self.a, args[0], value);
                 }
             },
-            .de, .am, .ig => self.skip_until_dotdot = true,
+            .de, .am, .de1, .am1, .dei, .ami, .dei1, .ami1 => {
+                // `.de NAME [END]`: the body ends at `..`, or at `.END` if given.
+                self.skip_end = if (args.len > 1) try std.fmt.allocPrint(self.a, ".{s}", .{args[1]}) else "..";
+            },
+            .ig => self.skip_end = if (args.len > 0) try std.fmt.allocPrint(self.a, ".{s}", .{args[0]}) else "..",
             .@"if", .ie => try self.conditional(rest, req == .ie),
             .el => try self.elseBranch(rest),
             else => {}, // layout requests with no counterpart in the tree
@@ -542,8 +553,8 @@ const Parser = struct {
         var l = raw;
         if (l.len > 0 and l[l.len - 1] == '\r') l = l[0 .. l.len - 1];
 
-        if (self.skip_until_dotdot) {
-            if (std.mem.startsWith(u8, l, "..")) self.skip_until_dotdot = false;
+        if (self.skip_end) |end| {
+            if (std.mem.startsWith(u8, l, end)) self.skip_end = null;
             return;
         }
         if (self.skip_depth > 0) {

@@ -247,3 +247,24 @@ test "mdoc: malformed input does not crash" {
         testing.allocator.free(out);
     }
 }
+
+test "macro definitions are skipped (rst2man style, custom end marker)" {
+    const out = try text(
+        \\.de1 rstReportMargin
+        \\\\$1 \\n[an-margin]
+        \\level \\n[rst2man-indent-level]
+        \\..
+        \\.de X Z
+        \\hidden body
+        \\..still hidden
+        \\.Z
+        \\.ig
+        \\ignored block
+        \\..
+        \\.SH NAME
+        \\shown
+        \\
+    );
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("## NAME\n\nshown\n", out);
+}

@@ -11,7 +11,7 @@ const err_invalid_argument = 1;
 const err_out_of_memory = 2;
 
 export fn gtroff_version() [*:0]const u8 {
-    return "0.2.0";
+    return "0.2.1";
 }
 
 fn input(src: ?[*]const u8, len: usize) ?[]const u8 {

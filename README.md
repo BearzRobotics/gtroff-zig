@@ -20,7 +20,7 @@ defer doc.deinit();
 try doc.writeText(gpa, writer, .{ .width = 80 }); // md-zig's terminal renderer
 ```
 
-Add it to a project with `zig fetch --save https://github.com/BearzRobotics/gtroff-zig/releases/download/v0.2.0/gtroff-0.2.0.tar.gz`
+Add it to a project with `zig fetch --save https://github.com/BearzRobotics/gtroff-zig/releases/download/v0.2.1/gtroff-0.2.1.tar.gz`
 and import the `gtroff` module.
 
 **C interface (experimental, unstable):** `include/gtroff.h` and `zig build c-api`
