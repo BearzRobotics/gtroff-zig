@@ -26,13 +26,21 @@ int main(void) {
     CHECK(contains(out, n, "<strong>directory</strong>"));
     gtroff_free_string(out, n);
 
+    const char *mdoc = ".Dd today\n.Dt LS 1\n.Os\n.Sh NAME\n.Nm ls\n.Nd list files\n";
+    CHECK(gtroff_mdoc_to_text((const uint8_t *)mdoc, strlen(mdoc), 60, 0, &out, &n) == GTROFF_OK);
+    CHECK(contains(out, n, "**ls** \xe2\x80\x94 list files"));
+    gtroff_free_string(out, n);
+    CHECK(gtroff_mdoc_to_html((const uint8_t *)mdoc, strlen(mdoc), &out, &n) == GTROFF_OK);
+    CHECK(contains(out, n, "<strong>ls</strong>"));
+    gtroff_free_string(out, n);
+
     CHECK(gtroff_man_to_text(NULL, 0, 0, 0, &out, &n) == GTROFF_OK);
     gtroff_free_string(out, n);
     CHECK(gtroff_man_to_text(NULL, 3, 0, 0, &out, &n) == GTROFF_ERR_INVALID_ARGUMENT);
     CHECK(out == NULL && n == 0);
     CHECK(gtroff_man_to_text((const uint8_t *)"x", 1, 0, 0, NULL, &n) == GTROFF_ERR_INVALID_ARGUMENT);
     gtroff_free_string(NULL, 0);
-    CHECK(strcmp(gtroff_version(), "0.1.0") == 0);
+    CHECK(strcmp(gtroff_version(), "0.2.0") == 0);
     if (fails == 0) printf("c api ok\n");
     return fails ? 1 : 0;
 }
