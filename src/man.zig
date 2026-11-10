@@ -121,6 +121,8 @@ const Parser = struct {
     indent: u16 = 7,
     continued: bool = false,
     line_no: u32 = 0,
+    /// Keep `.\"` comment lines as HTML comments in the tree.
+    keep_comments: bool = false,
 
     fn node(self: *Parser, kind: md.Kind) Allocator.Error!*Node {
         const n = try self.a.create(Node);
@@ -739,6 +741,9 @@ const Parser = struct {
         if (std.mem.endsWith(u8, l, "\\}")) l = l[0 .. l.len - 2];
         if (std.mem.eql(u8, std.mem.trim(u8, l, " \t"), ".")) return;
 
+        if (self.keep_comments and !self.nofill) {
+            if (commentBody(l)) |t| return self.addComment(t);
+        }
         if (self.in_tbl) return self.tblLine(l);
         if (l.len > 0 and (l[0] == '.' or l[0] == '\'')) {
             const is_end = std.mem.startsWith(u8, l[1..], "fi") or std.mem.startsWith(u8, l[1..], "EE");
@@ -750,6 +755,15 @@ const Parser = struct {
             return;
         }
         try self.textLine(l);
+    }
+
+    /// A whole-line comment becomes an HTML comment: inline when it sits in a
+    /// paragraph, a block otherwise. In a heading or term it is dropped.
+    fn addComment(self: *Parser, text: []const u8) Allocator.Error!void {
+        if (self.pending_heading != null or self.pending_term != null or self.link != null) return;
+        const n = try self.node(if (self.para != null) .html_inline else .html_block);
+        n.literal = try htmlComment(self.a, text);
+        if (self.para) |p| p.appendChild(n) else self.cur.appendChild(n);
     }
 
     /// Runs a user macro: its body lines with the arguments filled in.
@@ -940,6 +954,33 @@ const Parser = struct {
     }
 };
 
+/// The text of a whole-line comment (`.\" text`, `\" text`), or null.
+pub fn commentBody(l: []const u8) ?[]const u8 {
+    var rest: []const u8 = undefined;
+    if (std.mem.startsWith(u8, l, ".\\\"") or std.mem.startsWith(u8, l, "'\\\"")) {
+        rest = l[3..];
+    } else if (std.mem.startsWith(u8, l, "\\\"")) {
+        rest = l[2..];
+    } else return null;
+    if (rest.len > 0 and rest[0] == ' ') rest = rest[1..];
+    return std.mem.trimEnd(u8, rest, " \t\r");
+}
+
+/// `text` as an HTML comment; a `-->` inside it is broken up so it cannot end the comment early.
+pub fn htmlComment(a: Allocator, text: []const u8) Allocator.Error![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(a, "<!-- ");
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        if (std.mem.startsWith(u8, text[i..], "-->")) {
+            try out.appendSlice(a, "-- >");
+            i += 2;
+        } else try out.append(a, text[i]);
+    }
+    try out.appendSlice(a, " -->");
+    return out.items;
+}
+
 /// The line without a trailing `\"` comment (`\\` pairs are skipped).
 fn stripComment(l: []const u8) []const u8 {
     var i: usize = 0;
@@ -989,6 +1030,17 @@ fn splitArgs(a: Allocator, s: []const u8) Allocator.Error![]const []const u8 {
 
 /// Parses a man(7) page. The tree is owned by the returned document.
 pub fn parse(gpa: Allocator, source: []const u8) Allocator.Error!md.Document {
+    return parseOptions(gpa, source, .{});
+}
+
+pub const Options = struct {
+    /// Keep whole-line `.\"` comments as HTML comments (`<!-- text -->`) in
+    /// the tree, so `writeMan` can write them back. Off by default: renderers
+    /// would show them.
+    keep_comments: bool = false,
+};
+
+pub fn parseOptions(gpa: Allocator, source: []const u8, options: Options) Allocator.Error!md.Document {
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
     const a = arena.allocator();
@@ -996,7 +1048,7 @@ pub fn parse(gpa: Allocator, source: []const u8) Allocator.Error!md.Document {
     root.* = .{ .kind = .document, .line = 1 };
     root.build.open = false;
 
-    var p: Parser = .{ .a = a, .root = root, .container = root, .cur = root, .st = try escape.State.init(a) };
+    var p: Parser = .{ .a = a, .root = root, .container = root, .cur = root, .st = try escape.State.init(a), .keep_comments = options.keep_comments };
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
     try p.flushCode();

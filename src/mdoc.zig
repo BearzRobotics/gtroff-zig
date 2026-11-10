@@ -15,6 +15,7 @@ const md = @import("md");
 const Allocator = std.mem.Allocator;
 const Node = md.Node;
 const escape = @import("escape.zig");
+const man = @import("man.zig");
 const Font = escape.Font;
 
 const max_levels = 16;
@@ -215,6 +216,7 @@ const Parser = struct {
     spacing: bool = true,
     rs: ?Reference = null,
     line_no: u32 = 0,
+    keep_comments: bool = false,
 
     fn node(self: *Parser, kind: md.Kind) Allocator.Error!*Node {
         const n = try self.a.create(Node);
@@ -1008,8 +1010,15 @@ const Parser = struct {
         var l = raw;
         if (l.len > 0 and l[l.len - 1] == '\r') l = l[0 .. l.len - 1];
         const is_macro = l.len > 1 and (l[0] == '.' or l[0] == '\'') and l[1] != '\\' and !std.ascii.isWhitespace(l[1]);
-        if (l.len > 1 and l[0] == '.' and std.mem.startsWith(u8, l[1..], "\\\"")) return; // comment
-        if (std.mem.startsWith(u8, l, "\\\"")) return;
+        if (man.commentBody(l)) |t| {
+            // A comment inside a paragraph or literal block is dropped.
+            if (self.keep_comments and self.para == null and !self.bd_literal and self.xo == null) {
+                const n = try self.node(.html_block);
+                n.literal = try man.htmlComment(self.a, t);
+                self.cur.appendChild(n);
+            }
+            return;
+        }
 
         var words: []const Word = &.{};
         if (is_macro) words = try splitWords(self.a, l[1..]);
@@ -1156,6 +1165,10 @@ fn libraryName(arg: []const u8) []const u8 {
 
 /// Parses an mdoc(7) page. The tree is owned by the returned document.
 pub fn parse(gpa: Allocator, source: []const u8) Allocator.Error!md.Document {
+    return parseOptions(gpa, source, .{});
+}
+
+pub fn parseOptions(gpa: Allocator, source: []const u8, options: man.Options) Allocator.Error!md.Document {
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
     const a = arena.allocator();
@@ -1163,7 +1176,7 @@ pub fn parse(gpa: Allocator, source: []const u8) Allocator.Error!md.Document {
     root.* = .{ .kind = .document, .line = 1 };
     root.build.open = false;
 
-    var p: Parser = .{ .a = a, .root = root, .cur = root, .target = root };
+    var p: Parser = .{ .a = a, .root = root, .cur = root, .target = root, .keep_comments = options.keep_comments };
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
     try p.endReference();

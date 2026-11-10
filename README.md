@@ -20,6 +20,23 @@ defer doc.deinit();
 try doc.writeText(gpa, writer, .{ .width = 80 }); // md-zig's terminal renderer
 ```
 
+Write a tree back out as a man(7) page, and keep `.\"` comments on the way:
+
+```zig
+var doc = try gtroff.parseManOptions(gpa, source, .{ .keep_comments = true });
+// ... edit the tree ...
+try gtroff.writeMan(gpa, &doc, writer, .{});   // or gtroff.toManAlloc(gpa, &doc, .{})
+```
+
+Comments are read as HTML comments (`<!-- text -->`, a block or inline node) and
+written back as `.\" text`; an md-zig tree parsed from Markdown works too, so
+`<!-- note -->` in a `.md` file becomes a roff comment. Off by default, because
+renderers would show them. Only whole-line comments are kept, not a `\"` at the
+end of a line. The writer emits `.TH`, `.SH`/`.SS`, `.PP`, `.IP`/`.TP`, `.RS`/`.RE`,
+`.nf`/`.fi`, `.TS`/`.TE`, `.UR`/`.UE` and `\f` fonts; raw HTML other than comments
+is left out, images become their alt text. Reading what was written gives the
+same text (tested); the roff itself is normalised, not the original.
+
 Add it to a project with `zig fetch --save https://github.com/BearzRobotics/gtroff-zig/releases/download/v0.3.0/gtroff-0.3.0.tar.gz`
 and import the `gtroff` module.
 
