@@ -37,7 +37,7 @@ end of a line. The writer emits `.TH`, `.SH`/`.SS`, `.PP`, `.IP`/`.TP`, `.RS`/`.
 is left out, images become their alt text. Reading what was written gives the
 same text (tested); the roff itself is normalised, not the original.
 
-Add it to a project with `zig fetch --save https://github.com/BearzRobotics/gtroff-zig/releases/download/v0.4.0/gtroff-0.4.0.tar.gz`
+Add it to a project with `zig fetch --save https://github.com/BearzRobotics/gtroff-zig/releases/download/v0.5.0/gtroff-0.5.0.tar.gz`
 and import the `gtroff` module.
 
 **C interface (experimental, unstable):** `include/gtroff.h` and `zig build c-api`

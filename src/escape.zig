@@ -139,8 +139,45 @@ fn unicodeName(name: []const u8, buf: *[4]u8) ?[]const u8 {
     return buf[0..n];
 }
 
+/// `line` with the strings the page defined (`.ds`) pasted in as text, so the
+/// escapes inside them (`.ds Aq \(aq`, `.ds Name \fBx\fP`) are read like any
+/// other input, as troff does when it interpolates a string. Nested
+/// references are followed a few levels deep (a string that names itself ends
+/// there). Memory comes from `a`.
+fn pasteStrings(a: Allocator, st: *State, line: []const u8, depth: u8) Allocator.Error![]const u8 {
+    if (depth >= 8 or std.mem.find(u8, line, "\\*") == null) return line;
+    var out: std.ArrayList(u8) = .empty;
+    var i: usize = 0;
+    while (i < line.len) {
+        if (line[i] != '\\' or i + 1 >= line.len) {
+            try out.append(a, line[i]);
+            i += 1;
+            continue;
+        }
+        // An escaped backslash is not the start of `\*`.
+        if (line[i + 1] != '*') {
+            try out.appendSlice(a, line[i .. i + 2]);
+            i += 2;
+            continue;
+        }
+        const nm = readName(line[i + 2 ..]) orelse {
+            try out.appendSlice(a, line[i..]);
+            break;
+        };
+        if (st.strings.get(nm.name)) |v| {
+            try out.appendSlice(a, try pasteStrings(a, st, v, depth + 1));
+        } else {
+            // Predefined or unknown: left for `segments`.
+            try out.appendSlice(a, line[i .. i + 2 + nm.used]);
+        }
+        i += 2 + nm.used;
+    }
+    return out.items;
+}
+
 /// Splits `line` into font runs. Result memory comes from `a`.
-pub fn segments(a: Allocator, st: *State, line: []const u8) Allocator.Error!Result {
+pub fn segments(a: Allocator, st: *State, line_in: []const u8) Allocator.Error!Result {
+    const line = try pasteStrings(a, st, line_in, 0);
     var out: std.ArrayList(Segment) = .empty;
     var buf: std.ArrayList(u8) = .empty;
     var run_font = st.font;
@@ -357,6 +394,23 @@ test "fonts, specials and drops" {
     try std.testing.expect(r.segments[1].font.bold);
     try std.testing.expectEqualStrings("bold", r.segments[1].text);
     try std.testing.expectEqualStrings(" \u{2014} -xy \\ small \u{00e9}", r.segments[2].text);
+}
+
+test "a string holding escapes is read when it is used" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+    var st = try State.init(a);
+    try st.strings.put(a, "Aq", "\\(aq");
+    try st.strings.put(a, "B", "\\fBbold\\fR");
+    try st.strings.put(a, "Loop", "x\\*[Loop]");
+    const r = try segments(a, &st, "a \\*(Aq.\\*(Aq \\*[B] \\\\*(Aq");
+    var all: std.ArrayList(u8) = .empty;
+    for (r.segments) |seg| try all.appendSlice(a, seg.text);
+    try std.testing.expectEqualStrings("a '.' bold \\*(Aq", all.items);
+    try std.testing.expect(r.segments[1].font.bold);
+    // A string that names itself ends after a few levels.
+    _ = try segments(a, &st, "\\*[Loop]");
 }
 
 test "registers: \\n[x], \\n(xx, \\nx and auto-increment" {
