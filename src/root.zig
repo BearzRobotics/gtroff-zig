@@ -34,4 +34,5 @@ test {
     _ = @import("expr.zig");
     _ = @import("tests.zig");
     _ = @import("write_tests.zig");
+    _ = @import("regress_tests.zig");
 }

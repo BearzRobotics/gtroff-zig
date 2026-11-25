@@ -546,7 +546,7 @@ const Parser = struct {
             .TS => {
                 self.endPara();
                 self.in_tbl = true;
-                self.tbl_lines.clearRetainingCapacity();
+                self.tbl_lines = .empty;
             },
             .TE => {},
             .UR, .MT => {
@@ -829,7 +829,10 @@ const Parser = struct {
     /// `=` rules, and `T{ ... T}` text blocks. Boxes and rules are not drawn;
     /// the first row is a header when a rule follows it or its columns are bold.
     fn buildTable(self: *Parser) Allocator.Error!void {
+        // Take the lines: the lines of a `T{` block are run like any input and
+        // may start another table, which must not overwrite these.
         const lines = self.tbl_lines.items;
+        self.tbl_lines = .empty;
         var i: usize = 0;
         var tab: u8 = '\t';
         if (i < lines.len) {
@@ -896,6 +899,11 @@ const Parser = struct {
                     while (j < lines.len and !std.mem.startsWith(u8, std.mem.trim(u8, lines[j], " \t"), "T}")) : (j += 1) {
                         try self.line(lines[j]);
                         self.para = cell;
+                    }
+                    // A table opened inside the block ends with the block.
+                    if (self.in_tbl) {
+                        self.in_tbl = false;
+                        try self.buildTable();
                     }
                     self.para = saved_para;
                     self.st.font = .roman;
