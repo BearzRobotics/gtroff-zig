@@ -298,9 +298,10 @@ test "user macros with arguments, redefinition by .am, and line continuation" {
 }
 
 test "a macro may call itself only a bounded number of times" {
-    const out = try text(".de Loop\n.Loop\nx\n..\n.Loop\ndone\n");
+    // One `x` per level: exactly 16 levels run.
+    const out = try text(".de Loop\nx\n.Loop\n..\n.Loop\ndone\n");
     defer testing.allocator.free(out);
-    try testing.expect(std.mem.find(u8, out, "done") != null);
+    try testing.expectEqualStrings("x x x x x x x x x x x x x x x x done\n", out);
 }
 
 test "font macros inside no-fill blocks keep their spaces" {
@@ -325,8 +326,12 @@ test "tbl rows of different lengths are padded to the widest" {
     const out = try text(".TS\ntab(|);\nl s l\nl l l.\nTop|X\na|b|c\n.TE\n");
     defer testing.allocator.free(out);
     // All three columns of the second row survive although the first row is short.
-    try testing.expect(std.mem.find(u8, out, "c") != null);
-    try testing.expect(std.mem.find(u8, out, "b") != null);
+    var doc = try gtroff.parseMan(testing.allocator, ".TS\ntab(|);\nl s l\nl l l.\nTop|X\na|b|c\n.TE\n");
+    defer doc.deinit();
+    const out_html = try doc.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(out_html);
+    try testing.expect(std.mem.find(u8, out_html, "<tr>\n<td>Top</td>\n<td>X</td>\n<td></td>\n</tr>") != null);
+    try testing.expect(std.mem.find(u8, out_html, "<tr>\n<td>a</td>\n<td>b</td>\n<td>c</td>\n</tr>") != null);
 }
 
 test "mdoc: Xo and Xc on one line, and an unterminated Xo ends at the next section" {
@@ -354,7 +359,7 @@ test "mdoc: Xo and Xc on one line, and an unterminated Xo ends at the next secti
 test "mdoc: Sm off glues words, An -nosplit is not printed" {
     const out = try mdocText(".Dd d\n.Dt T 1\n.Os\n.Sh SYNOPSIS\n.Op Fl L Sm off Ar port : Ar host Sm on\n.Sh AUTHORS\n.An -nosplit\n.An Jane Doe\n");
     defer testing.allocator.free(out);
-    try testing.expect(std.mem.find(u8, out, "_port_:_host_") != null or std.mem.find(u8, out, "_port:host_") != null);
+    try testing.expect(std.mem.find(u8, out, "_port_:_host_") != null);
     try testing.expect(std.mem.find(u8, out, "nosplit") == null);
     try testing.expect(std.mem.find(u8, out, "Jane Doe") != null);
 }
@@ -397,4 +402,83 @@ test "a definition may end with dot, blanks, dot (Asciidoctor)" {
     const out = try text(".if \\n[.g] \\{\\\n.  am URL\n.    ad l\n.  .\n.  am MTO\n.    ad l\n.  .\n.\\}\n.SH NAME\nkept\n");
     defer testing.allocator.free(out);
     try testing.expectEqualStrings("## NAME\n\n       kept\n", out);
+}
+
+fn expectText(src: []const u8, want: []const u8) !void {
+    const out = try text(src);
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings(want, out);
+}
+
+fn expectHtml(doc_in: anytype, want: []const u8) !void {
+    var doc = try doc_in;
+    defer doc.deinit();
+    const out = try doc.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings(want, out);
+}
+
+test ".RS nests and each .RE returns one level" {
+    try expectText(".SH A\nzero\n.RS\none\n.RS\ntwo\n.RE\nback-one\n.RE\nback-zero\n",
+        \\## A
+        \\
+        \\       zero
+        \\
+        \\              one
+        \\
+        \\                     two
+        \\
+        \\              back-one
+        \\
+        \\       back-zero
+        \\
+    );
+}
+
+test ".br breaks the line" {
+    try expectText("first\n.br\nsecond\n", "first\nsecond\n");
+}
+
+test ".MT makes a mailto link and .ME takes punctuation" {
+    try expectHtml(
+        gtroff.parseMan(testing.allocator, ".MT a@b.org\nmail me\n.ME .\n"),
+        "<p><a href=\"mailto:a@b.org\">mail me</a>.</p>\n",
+    );
+}
+
+test ".SY and .OP write a synopsis" {
+    try expectText(".SY cmd\n.OP -a file\n.OP -v\n.YS\n", "**cmd** [**-a** _file_] [**-v**]\n");
+}
+
+test "keep_comments: a --> inside a comment does not end the HTML comment" {
+    const src = ".\\\" a --> <b>\n";
+    const want = "<!-- a -- > <b> -->\n";
+    try expectHtml(gtroff.parseManOptions(testing.allocator, src, .{ .keep_comments = true }), want);
+    try expectHtml(gtroff.parseMdocOptions(testing.allocator, src, .{ .keep_comments = true }), want);
+}
+
+test "mdoc: nested bullet and enumerated lists" {
+    try expectHtml(
+        gtroff.parseMdoc(testing.allocator, ".Bl -bullet\n.It\nouter\n.Bl -enum\n.It\nfirst\n.It\nsecond\n.El\n.It\nafter\n.El\ntail\n"),
+        "<ul>\n<li>outer\n<ol>\n<li>first</li>\n<li>second</li>\n</ol>\n</li>\n<li>after</li>\n</ul>\n<p>tail</p>\n",
+    );
+}
+
+test "mdoc: links and mail addresses" {
+    try expectHtml(
+        gtroff.parseMdoc(testing.allocator, ".Lk http://example.com the site .\n.Pp\n.Mt a@b.org\n"),
+        "<p><a href=\"http://example.com\">the site</a>.</p>\n<p><a href=\"mailto:a@b.org\">a@b.org</a></p>\n",
+    );
+}
+
+test "mdoc: .Ex and .Rv write their sentences" {
+    // Checked as terminal text, which collapses the doubled blanks the reader
+    // currently leaves around names (a known bug, visible in HTML).
+    var doc = try gtroff.parseMdoc(testing.allocator, ".Ex -std ls\n.Pp\n.Rv -std open close\n");
+    defer doc.deinit();
+    const out = try doc.toTextAlloc(testing.allocator, .{ .width = 0 });
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("The **ls** utility exits 0 on success, and >0 if an error occurs.\n\n" ++
+        "The **open()** and **close()** functions return the value 0 if successful; " ++
+        "otherwise the value -1 is returned and the global variable errno is set to indicate the error.\n", out);
 }

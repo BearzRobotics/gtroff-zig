@@ -150,3 +150,51 @@ test "too deep nesting fails cleanly" {
     defer doc.deinit();
     try testing.expectError(error.TooDeep, gtroff.toManAlloc(gpa, &doc, .{}));
 }
+
+fn expectMan(doc_in: anytype, options: gtroff.WriteOptions, want: []const u8) !void {
+    var doc = try doc_in;
+    defer doc.deinit();
+    const out = try gtroff.toManAlloc(testing.allocator, &doc, options);
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings(want, out);
+}
+
+test "an indented block is written between .RS and .RE" {
+    try expectMan(
+        gtroff.parseMan(testing.allocator, ".SH A\ntext\n.RS 4\ninner\n.RE\n.PP\nouter\n"),
+        .{},
+        ".TH \"UNTITLED\" \"7\"\n.SH \"A\"\n.PP\ntext\n.RS 4\n.PP\ninner\n.RE\n.PP\nouter\n",
+    );
+}
+
+test "ordered list numbers count up from the start" {
+    try expectMan(
+        md.Document.parse(testing.allocator, "3. a\n4. b\n5. c\n", .{}),
+        .{},
+        ".TH \"UNTITLED\" \"7\"\n.IP \"3.\" 4\na\n.IP \"4.\" 4\nb\n.IP \"5.\" 4\nc\n",
+    );
+}
+
+test "a hard line break is written as .br" {
+    try expectMan(
+        md.Document.parse(testing.allocator, "one\\\ntwo\n", .{}),
+        .{},
+        ".TH \"UNTITLED\" \"7\"\n.PP\none\n.br\ntwo\n",
+    );
+}
+
+test "date, source and manual options go into .TH" {
+    try expectMan(
+        md.Document.parse(testing.allocator, "# t(1)\n", .{}),
+        .{ .date = "June 2026", .source = "tools 1.0", .manual = "User Commands" },
+        ".TH \"t\" \"1\" \"June 2026\" \"tools 1.0\" \"User Commands\"\n",
+    );
+}
+
+test "a date alone still goes into .TH" {
+    try expectMan(
+        md.Document.parse(testing.allocator, "# t(1)\n", .{}),
+        .{ .date = "June 2026" },
+        ".TH \"t\" \"1\" \"June 2026\" \"\" \"\"\n",
+    );
+}

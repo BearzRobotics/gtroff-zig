@@ -136,6 +136,8 @@ test "left to right, no precedence" {
     try std.testing.expectEqual(@as(i64, 7), try eval("1+(2*3)"));
     try std.testing.expectEqual(@as(i64, 5), try eval("10/2"));
     try std.testing.expectEqual(@as(i64, 1), try eval("7%3"));
+    try std.testing.expectEqual(@as(i64, 2), try eval("17%5"));
+    try std.testing.expectEqual(@as(i64, 0), try eval("9%3"));
     try std.testing.expectEqual(@as(i64, -3), try eval("-3"));
     try std.testing.expectEqual(@as(i64, 4), try eval("3.5n+1"));
 }
