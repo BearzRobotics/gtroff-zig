@@ -30,3 +30,15 @@ test "BUG-001: a table started inside a T{ block does not disturb the outer one"
     try testing.expect(std.mem.find(u8, out, "row3") != null);
     try testing.expect(std.mem.find(u8, out, "after") != null);
 }
+
+test "BUG-002: deeply nested expressions are an error, not a stack overflow" {
+    const n = 400_000;
+    const buf = try testing.allocator.alloc(u8, n + 1);
+    defer testing.allocator.free(buf);
+    @memset(buf, '(');
+    try testing.expectError(error.Syntax, gtroff.expr.eval(buf[0..n]));
+    @memset(buf, '-');
+    buf[n] = '1';
+    try testing.expectEqual(@as(i64, 1), try gtroff.expr.eval(buf));
+    try testing.expectEqual(@as(i64, 0), try gtroff.expr.eval("!-!0"));
+}

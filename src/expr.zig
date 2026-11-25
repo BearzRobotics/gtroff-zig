@@ -10,9 +10,13 @@ const std = @import("std");
 
 pub const Error = error{ Syntax, DivisionByZero };
 
+/// Deepest parenthesis nesting accepted; more is a syntax error.
+const max_depth = 64;
+
 const Parser = struct {
     s: []const u8,
     i: usize = 0,
+    depth: usize = 0,
 
     fn peek(self: *const Parser) ?u8 {
         return if (self.i < self.s.len) self.s[self.i] else null;
@@ -28,30 +32,35 @@ const Parser = struct {
         return v;
     }
 
+    /// A number or parenthesised expression with its leading `+`, `-` and `!`.
+    /// The signs are counted in a loop so that a long run cannot use up the stack.
     fn unary(self: *Parser) Error!f64 {
-        const c = self.peek() orelse return error.Syntax;
-        switch (c) {
-            '+' => {
-                self.i += 1;
-                return self.unary();
-            },
-            '-' => {
-                self.i += 1;
-                return -(try self.unary());
-            },
-            '!' => {
-                self.i += 1;
-                return if ((try self.unary()) == 0) 1 else 0;
-            },
-            '(' => {
-                self.i += 1;
-                const v = try self.expr();
-                if (self.peek() != ')') return error.Syntax;
-                self.i += 1;
-                return v;
-            },
-            else => return self.number(),
+        const start = self.i;
+        while (self.peek()) |c| : (self.i += 1) {
+            if (c != '+' and c != '-' and c != '!') break;
         }
+        const signs = self.s[start..self.i];
+        var v = try self.primary();
+        var k = signs.len;
+        while (k > 0) {
+            k -= 1;
+            if (signs[k] == '-') v = -v;
+            if (signs[k] == '!') v = if (v == 0) 1 else 0;
+        }
+        return v;
+    }
+
+    fn primary(self: *Parser) Error!f64 {
+        const c = self.peek() orelse return error.Syntax;
+        if (c != '(') return self.number();
+        if (self.depth >= max_depth) return error.Syntax;
+        self.depth += 1;
+        defer self.depth -= 1;
+        self.i += 1;
+        const v = try self.expr();
+        if (self.peek() != ')') return error.Syntax;
+        self.i += 1;
+        return v;
     }
 
     fn expr(self: *Parser) Error!f64 {
