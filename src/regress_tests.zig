@@ -42,3 +42,14 @@ test "BUG-002: deeply nested expressions are an error, not a stack overflow" {
     try testing.expectEqual(@as(i64, 1), try gtroff.expr.eval(buf));
     try testing.expectEqual(@as(i64, 0), try gtroff.expr.eval("!-!0"));
 }
+
+test "BUG-003: a long run of enclosure macros does not overflow the stack" {
+    var big: std.ArrayList(u8) = .empty;
+    defer big.deinit(testing.allocator);
+    try big.appendSlice(testing.allocator, ".Sh D\n.");
+    for (0..20_000) |_| try big.appendSlice(testing.allocator, "Op ");
+    try big.appendSlice(testing.allocator, "x\n");
+    const out = try render(.mdoc, big.items);
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "x") != null);
+}

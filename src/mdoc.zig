@@ -19,6 +19,8 @@ const man = @import("man.zig");
 const Font = escape.Font;
 
 const max_levels = 16;
+/// Deepest nesting of enclosure macros on one line; further ones are ignored.
+const max_nest = 32;
 
 const Word = struct { text: []const u8, quoted: bool = false };
 
@@ -205,6 +207,7 @@ const Parser = struct {
     last_top: ?*Node = null,
     last_leaf: ?*Node = null,
     last_font: Font = .roman,
+    nest: usize = 0,
 
     bd_literal: bool = false,
     code: std.ArrayList(u8) = .empty,
@@ -360,6 +363,10 @@ const Parser = struct {
     }
 
     fn enclosed(self: *Parser, open: []const u8, close: []const u8, words: []const Word, start: usize) Allocator.Error!usize {
+        // The caller's loop goes on with the words, without recursion.
+        if (self.nest >= max_nest) return start;
+        self.nest += 1;
+        defer self.nest -= 1;
         var end = words.len;
         while (end > start and isClosing(words[end - 1])) end -= 1;
         try self.emit(open, .roman, false, true);
