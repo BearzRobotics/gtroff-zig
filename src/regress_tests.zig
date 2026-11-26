@@ -457,3 +457,22 @@ test "BUG-057: a bare font macro adds no line in a no-fill block" {
 test "BUG-058: .Pp leaves a blank line in a literal display" {
     try expect(.mdoc, ".Bd -literal\na\n.Pp\nb\n.Ed\n", "a\n\nb\n");
 }
+
+test "BUG-059: nodes carry source line numbers" {
+    for ([_]Format{ .man, .mdoc }) |format| {
+        const src = ".de M\na\nb\n..\n.M\n.Pp\n.PP\none \\\ntwo\n.Pp\n.PP\nlast\n";
+        var doc = try switch (format) {
+            .man => gtroff.parseMan(testing.allocator, src),
+            .mdoc => gtroff.parseMdoc(testing.allocator, src),
+        };
+        defer doc.deinit();
+        var lines: [3]u32 = undefined;
+        var n: usize = 0;
+        var walker = md.Walker.init(doc.root);
+        while (walker.next()) |ev| if (ev.entering and ev.node.kind == .paragraph) {
+            lines[n] = ev.node.line;
+            n += 1;
+        };
+        try testing.expectEqualSlices(u32, &.{ 5, 8, 12 }, lines[0..n]);
+    }
+}

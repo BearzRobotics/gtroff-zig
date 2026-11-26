@@ -1249,7 +1249,6 @@ const Parser = struct {
     }
 
     fn line(self: *Parser, raw: []const u8) Allocator.Error!void {
-        self.line_no += 1;
         var l = raw;
         if (l.len > 0 and l[l.len - 1] == '\r') l = l[0 .. l.len - 1];
         l = try escape.sanitize(self.a, l);
@@ -1477,7 +1476,15 @@ pub fn parseOptions(gpa: Allocator, source: []const u8, options: man.Options) Al
 
     var p: Parser = .{ .a = a, .root = root, .cur = root, .target = root, .st = try escape.State.init(a), .keep_comments = options.keep_comments };
     var lines = std.mem.splitScalar(u8, source, '\n');
-    while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
+    // Nodes carry the number of the source line being read; lines that macros
+    // and conditionals run count as the line that ran them.
+    var used: u32 = 0;
+    while (true) {
+        const start = used +| 1;
+        const l = try escape.nextLogicalLine(a, &lines, &used) orelse break;
+        p.line_no = start;
+        try p.line(l);
+    }
     try p.endXo();
     try p.endTable();
     try p.endReference();

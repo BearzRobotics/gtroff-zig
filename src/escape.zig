@@ -386,13 +386,16 @@ pub fn columns(s: []const u8) ?u16 {
 
 /// The next input line, with `\`-newline continuations joined: a line that ends
 /// in an odd number of backslashes continues on the next one.
-pub fn nextLogicalLine(a: Allocator, lines: *std.mem.SplitIterator(u8, .scalar)) Allocator.Error!?[]const u8 {
+/// `count` goes up by the number of input lines used.
+pub fn nextLogicalLine(a: Allocator, lines: *std.mem.SplitIterator(u8, .scalar), count: *u32) Allocator.Error!?[]const u8 {
     var line = withoutCr(lines.next() orelse return null);
+    count.* +|= 1;
     if (!endsWithContinuation(line)) return line;
     var buf: std.ArrayList(u8) = .empty;
     while (true) {
         try buf.appendSlice(a, line[0 .. line.len - 1]);
         line = withoutCr(lines.next() orelse break);
+        count.* +|= 1;
         if (!endsWithContinuation(line)) {
             try buf.appendSlice(a, line);
             break;
