@@ -202,6 +202,8 @@ const Parser = struct {
     target: *Node,
     stack: [max_levels]Ctx = undefined,
     depth: usize = 0,
+    /// Lists refused at the depth limit, whose `.El` is ignored too.
+    refused: usize = 0,
 
     /// A space is due before the next word.
     space: bool = false,
@@ -729,6 +731,7 @@ const Parser = struct {
     }
 
     fn closeAllLists(self: *Parser) Allocator.Error!void {
+        self.refused = 0;
         while (self.depth > 0) try self.popList();
         self.bd_literal = false;
         try self.flushCode();
@@ -745,7 +748,10 @@ const Parser = struct {
 
     fn startList(self: *Parser, args: []const Word) Allocator.Error!void {
         self.endPara();
-        if (self.depth >= max_levels) return;
+        if (self.depth >= max_levels) {
+            self.refused += 1;
+            return;
+        }
         var kind: ListKind = .tag;
         for (args) |w| {
             if (std.mem.eql(u8, w.text, "-bullet") or std.mem.eql(u8, w.text, "-dash") or std.mem.eql(u8, w.text, "-hyphen") or std.mem.eql(u8, w.text, "-item")) kind = .bullet;
@@ -1036,7 +1042,10 @@ const Parser = struct {
                 try self.parse(args);
             },
             .Bl => try self.startList(args),
-            .El => try self.popList(),
+            .El => if (self.refused > 0) {
+                self.refused -= 1;
+                self.endPara();
+            } else try self.popList(),
             .It => try self.item(args),
             .Bd => {
                 self.endPara();

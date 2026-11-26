@@ -137,6 +137,8 @@ pub const Parser = struct {
     cur: *Node,
     levels: [max_levels]*Node = undefined,
     depth: usize = 0,
+    /// `.RS` requests refused at the depth limit, whose `.RE` is ignored too.
+    refused: usize = 0,
 
     para: ?*Node = null,
     open_dl: ?*Node = null,
@@ -264,6 +266,7 @@ pub const Parser = struct {
             }
         }
         self.depth = 0;
+        self.refused = 0;
         self.indent = default_indent;
         self.one_shot = null;
         const h = try self.node(.heading);
@@ -344,7 +347,10 @@ pub const Parser = struct {
 
     fn pushQuote(self: *Parser, width: ?[]const u8) Allocator.Error!void {
         try self.endGroup();
-        if (self.depth >= max_levels) return;
+        if (self.depth >= max_levels) {
+            self.refused += 1;
+            return;
+        }
         const cols: u16 = if (width) |w| (escape.columns(w) orelse self.indent) else self.indent;
         self.levels[self.depth] = self.container;
         self.depth += 1;
@@ -359,6 +365,10 @@ pub const Parser = struct {
 
     fn popQuote(self: *Parser) Allocator.Error!void {
         try self.endGroup();
+        if (self.refused > 0) {
+            self.refused -= 1;
+            return;
+        }
         if (self.depth == 0) return;
         self.depth -= 1;
         self.container = self.levels[self.depth];

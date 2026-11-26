@@ -431,3 +431,21 @@ test "BUG-054: a bare font macro applies to the next line only" {
 test "BUG-055: .RE takes a level" {
     try expect(.man, "zero\n.RS\n.RS\ndeep\n.RE 1\nback\n", "zero\n\n              deep\n\nback\n");
 }
+
+test "BUG-056: closers past the nesting limit stay balanced" {
+    var src: std.ArrayList(u8) = .empty;
+    defer src.deinit(testing.allocator);
+    for (0..17) |_| try src.appendSlice(testing.allocator, ".RS\n");
+    for (0..17) |_| try src.appendSlice(testing.allocator, ".RE\n");
+    try src.appendSlice(testing.allocator, "outside\n");
+    const quotes = try render(.man, src.items);
+    defer testing.allocator.free(quotes);
+    try testing.expectEqualStrings("\noutside\n", quotes);
+    src.clearRetainingCapacity();
+    for (0..17) |_| try src.appendSlice(testing.allocator, ".Bl -bullet\n.It\nx\n");
+    for (0..17) |_| try src.appendSlice(testing.allocator, ".El\n");
+    try src.appendSlice(testing.allocator, "outside\n");
+    const out = try render(.mdoc, src.items);
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.endsWith(u8, out, "\noutside\n"));
+}
