@@ -28,6 +28,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "gtroff", .module = mod }},
     });
+    // The version is written once, in build.zig.zon.
+    const version: []const u8 = @import("build.zig.zon").version;
+    const capi_options = b.addOptions();
+    capi_options.addOption([]const u8, "version", version);
+    capi_mod.addOptions("build_options", capi_options);
+
     const static_lib = b.addLibrary(.{ .name = "gtroff", .linkage = .static, .root_module = capi_mod });
     const shared_lib = b.addLibrary(.{ .name = "gtroff", .linkage = .dynamic, .root_module = capi_mod });
     const c_api_step = b.step("c-api", "Build the experimental C library and header");
@@ -41,6 +47,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true }),
     });
     smoke.root_module.addCSourceFile(.{ .file = b.path("test/c/smoke.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra" } });
+    smoke.root_module.addCMacro("EXPECTED_VERSION", b.fmt("\"{s}\"", .{version}));
     smoke.root_module.addIncludePath(b.path("include"));
     smoke.root_module.linkLibrary(static_lib);
     test_step.dependOn(&b.addRunArtifact(smoke).step);

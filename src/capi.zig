@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const gtroff = @import("gtroff");
+const build_options = @import("build_options");
 
 const gpa = std.heap.smp_allocator;
 
@@ -11,7 +12,7 @@ const err_invalid_argument = 1;
 const err_out_of_memory = 2;
 
 export fn gtroff_version() [*:0]const u8 {
-    return "0.3.0";
+    return std.fmt.comptimePrint("{s}", .{build_options.version});
 }
 
 fn input(src: ?[*]const u8, len: usize) ?[]const u8 {
