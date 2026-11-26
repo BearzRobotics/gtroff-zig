@@ -206,6 +206,8 @@ const Parser = struct {
     /// The last run written by `emit`, so that neighbours in one font merge.
     last_top: ?*Node = null,
     last_leaf: ?*Node = null,
+    /// The growing text of `last_leaf`.
+    run: std.ArrayList(u8) = .empty,
     last_font: Font = .roman,
     nest: usize = 0,
 
@@ -263,13 +265,19 @@ const Parser = struct {
         const f: Font = if (font.eql(.roman)) self.base_font else font;
         if (self.last_leaf) |leaf| {
             if (self.target.last_child == self.last_top and self.last_font.eql(f)) {
-                leaf.literal = try std.mem.concat(self.a, u8, &.{ leaf.literal, if (lead) " " else "", text });
+                if (lead) try self.run.append(self.a, ' ');
+                try self.run.appendSlice(self.a, text);
+                leaf.literal = self.run.items;
                 self.space = !glue_after;
                 return;
             }
         }
         if (lead) try self.addRun(self.target, " ", .roman);
         const added = try self.addRunTracked(self.target, text, f);
+        // A new buffer: the finished run still points at the old one.
+        self.run = .empty;
+        try self.run.appendSlice(self.a, added.leaf.literal);
+        added.leaf.literal = self.run.items;
         self.last_top = added.top;
         self.last_leaf = added.leaf;
         self.last_font = f;

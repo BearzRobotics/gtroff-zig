@@ -123,3 +123,17 @@ test "BUG-010: table rows and padding are bounded" {
     // Text past the last column is kept.
     try testing.expect(last_text.len > 0);
 }
+
+test "BUG-011: a long mdoc line takes linear memory" {
+    var big: std.ArrayList(u8) = .empty;
+    defer big.deinit(testing.allocator);
+    try big.appendSlice(testing.allocator, ".No");
+    for (0..20_000) |_| try big.appendSlice(testing.allocator, " word");
+    var doc = try gtroff.parseMdoc(testing.allocator, big.items);
+    defer doc.deinit();
+    // About 1 KB a word; copying the run for each word took 1 GB.
+    try testing.expect(doc.arena.queryCapacity() < 40 << 20);
+    const out = try doc.toTextAlloc(testing.allocator, .{ .width = 0 });
+    defer testing.allocator.free(out);
+    try testing.expectEqual(@as(usize, 20_000 * 5), out.len);
+}
