@@ -161,13 +161,18 @@ pub fn sanitize(a: Allocator, l: []const u8) Allocator.Error![]const u8 {
     var done: usize = 0;
     var i: usize = 0;
     while (i < l.len) {
-        var len: usize = std.unicode.utf8ByteSequenceLength(l[i]) catch 1;
+        // A byte that cannot start a character is bad by itself; `utf8Decode`
+        // would take any single byte as one.
+        var len: usize = 1;
         var bad = true;
-        if (i + len <= l.len) {
-            if (std.unicode.utf8Decode(l[i..][0..len])) |cp| {
-                bad = isControl(cp);
-            } else |_| len = 1;
-        } else len = 1;
+        if (std.unicode.utf8ByteSequenceLength(l[i])) |n| {
+            if (i + n <= l.len) {
+                if (std.unicode.utf8Decode(l[i..][0..n])) |cp| {
+                    len = n;
+                    bad = isControl(cp);
+                } else |_| {}
+            }
+        } else |_| {}
         if (bad) {
             try out.appendSlice(a, l[done..i]);
             try out.appendSlice(a, "\u{fffd}");

@@ -501,3 +501,15 @@ test "BUG-068: mdoc macros work inside table cells" {
 test "BUG-069: .TH arguments may come from a string" {
     try expect(.man, ".ds x rpcgen 1 \"May 2026\"\n.TH \\*x\n", "# rpcgen(1)\n");
 }
+
+test "BUG-070: every byte that is not UTF-8 is replaced" {
+    var byte: u16 = 0x80;
+    while (byte <= 0xff) : (byte += 1) {
+        const src = [_]u8{ 'a', @intCast(byte), 'b', '\n' };
+        for ([_]Format{ .man, .mdoc }) |format| {
+            const out = try render(format, &src);
+            defer testing.allocator.free(out);
+            try testing.expectEqualStrings("a\u{fffd}b\n", out);
+        }
+    }
+}
