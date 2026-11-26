@@ -453,3 +453,7 @@ test "BUG-056: closers past the nesting limit stay balanced" {
 test "BUG-057: a bare font macro adds no line in a no-fill block" {
     try expect(.man, ".nf\n.B\nbold line\n.fi\n", "bold line\n");
 }
+
+test "BUG-058: .Pp leaves a blank line in a literal display" {
+    try expect(.mdoc, ".Bd -literal\na\n.Pp\nb\n.Ed\n", "a\n\nb\n");
+}

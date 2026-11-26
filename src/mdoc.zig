@@ -1033,7 +1033,9 @@ const Parser = struct {
             },
             .Sh => try self.heading(2, args),
             .Ss => try self.heading(3, args),
-            .Pp, .Lp => self.endPara(),
+            .Pp, .Lp => if (self.bd_literal) {
+                try self.code.append(self.a, '\n');
+            } else self.endPara(),
             .Nd => {
                 const p = try self.paragraph();
                 self.target = p;
