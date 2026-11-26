@@ -928,6 +928,26 @@ pub const Parser = struct {
         return cols.items;
     }
 
+    /// Reads row formats from `lines[start]` to the line ending in `.`, and
+    /// returns the index of the line after it.
+    fn parseFormats(self: *Parser, lines: []const []const u8, start: usize, formats: *std.ArrayList([]const ColSpec)) Allocator.Error!usize {
+        var i = start;
+        var done = false;
+        while (i < lines.len and !done) : (i += 1) {
+            var fl = std.mem.trim(u8, lines[i], " \t");
+            if (std.mem.endsWith(u8, fl, ".")) {
+                fl = fl[0 .. fl.len - 1];
+                done = true;
+            }
+            var parts = std.mem.splitScalar(u8, fl, ',');
+            while (parts.next()) |part| {
+                const f = try self.parseFormat(part);
+                if (f.len > 0) try formats.append(self.a, f);
+            }
+        }
+        return i;
+    }
+
     /// Builds a `table` from the collected tbl(1) lines: options, row formats
     /// (up to a line ending in `.`), then rows of tab separated cells, `_` and
     /// `=` rules, and `T{ ... T}` text blocks. Boxes and rules are not drawn;
@@ -954,24 +974,15 @@ pub const Parser = struct {
         }
 
         var formats: std.ArrayList([]const ColSpec) = .empty;
-        var done = false;
-        while (i < lines.len and !done) : (i += 1) {
-            var fl = std.mem.trim(u8, lines[i], " \t");
-            if (std.mem.endsWith(u8, fl, ".")) {
-                fl = fl[0 .. fl.len - 1];
-                done = true;
-            }
-            var parts = std.mem.splitScalar(u8, fl, ',');
-            while (parts.next()) |part| {
-                const f = try self.parseFormat(part);
-                if (f.len > 0) try formats.append(self.a, f);
-            }
-        }
+        i = try self.parseFormats(lines, i, &formats);
         if (formats.items.len == 0) return;
 
         const tbl = try self.node(.table);
         var rows: usize = 0;
         var header_by_rule = false;
+        // The formats in use, and the row they started at; `.T&` changes them.
+        var active = formats.items;
+        var active_from: usize = 0;
         while (i < lines.len) : (i += 1) {
             const l = lines[i];
             const t = std.mem.trim(u8, l, " \t");
@@ -980,9 +991,18 @@ pub const Parser = struct {
                 if (rows == 1) header_by_rule = true;
                 continue;
             }
+            if (std.mem.startsWith(u8, t, ".T&")) {
+                var changed: std.ArrayList([]const ColSpec) = .empty;
+                i = try self.parseFormats(lines, i + 1, &changed) - 1;
+                if (changed.items.len > 0) {
+                    active = changed.items;
+                    active_from = rows;
+                }
+                continue;
+            }
             if (t[0] == '.') continue; // requests between rows (.sp, .ne)
 
-            const fmt = formats.items[@min(rows, formats.items.len - 1)];
+            const fmt = active[@min(rows - active_from, active.len - 1)];
             const row = try self.node(.table_row);
             tbl.appendChild(row);
             var col: usize = 0;

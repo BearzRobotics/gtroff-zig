@@ -376,3 +376,12 @@ test "BUG-044: a link can be a tagged paragraph's term" {
         try testing.expect(std.mem.find(u8, h, "<p>def</p>") != null);
     }
 }
+
+test "BUG-045: .T& changes the format and is not a row" {
+    var doc = try gtroff.parseMan(testing.allocator, ".TS\nl l.\na\tb\n.T&\nr r.\nc\td\n.TE\n");
+    defer doc.deinit();
+    const html = try doc.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(html);
+    try testing.expect(std.mem.find(u8, html, "r r") == null);
+    try testing.expect(std.mem.find(u8, html, "<td align=\"right\">c</td>\n<td align=\"right\">d</td>") != null);
+}
