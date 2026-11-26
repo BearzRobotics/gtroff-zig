@@ -606,6 +606,9 @@ pub const Parser = struct {
         // at every level of a chain would take quadratic memory.
         const args: []const []const u8 = switch (req) {
             .@"if", .ie, .el => &.{},
+            // troff reads the strings before it splits the arguments, and some
+            // pages build the whole title line in one.
+            .TH => try splitArgs(self.a, try escape.pasteStrings(self.a, &self.st, rest, 0)),
             else => try splitArgs(self.a, rest),
         };
 

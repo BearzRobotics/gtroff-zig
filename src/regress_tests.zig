@@ -497,3 +497,7 @@ test "BUG-068: mdoc macros work inside table cells" {
     try testing.expect(std.mem.find(u8, out, "safe") != null);
     try testing.expect(std.mem.find(u8, out, "after") != null);
 }
+
+test "BUG-069: .TH arguments may come from a string" {
+    try expect(.man, ".ds x rpcgen 1 \"May 2026\"\n.TH \\*x\n", "# rpcgen(1)\n");
+}

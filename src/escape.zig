@@ -194,7 +194,7 @@ fn unicodeName(name: []const u8, buf: *[4]u8) ?[]const u8 {
 /// other input, as troff does when it interpolates a string. Nested
 /// references are followed a few levels deep (a string that names itself ends
 /// there). Memory comes from `a`.
-fn pasteStrings(a: Allocator, st: *State, line: []const u8, depth: u8) Allocator.Error![]const u8 {
+pub fn pasteStrings(a: Allocator, st: *State, line: []const u8, depth: u8) Allocator.Error![]const u8 {
     if (depth >= 8 or std.mem.find(u8, line, "\\*") == null) return line;
     var out: std.ArrayList(u8) = .empty;
     var i: usize = 0;
