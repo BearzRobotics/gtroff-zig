@@ -530,3 +530,15 @@ test "BUG-071: non-ASCII names and table separators are not cut in half" {
     defer testing.allocator.free(html);
     try testing.expect(std.mem.find(u8, html, "<td>a</td>\n<td>b</td>") != null);
 }
+
+test "BUG-072: tables nested in text blocks take bounded memory and stack" {
+    var big: std.ArrayList(u8) = .empty;
+    defer big.deinit(testing.allocator);
+    try big.appendSlice(testing.allocator, ".TS\nl.\n");
+    for (0..20_000) |_| try big.appendSlice(testing.allocator, "T{\n.TS\nl.\n");
+    for ([_][]const u8{ big.items, ".am X\n.X \\{.Ed\n\\s.OP T{\n.if !l r c.\n.TS\n.X \r\n..\n.X .RS" }) |src| {
+        var doc = try gtroff.parseMan(testing.allocator, src);
+        defer doc.deinit();
+        try testing.expect(doc.arena.queryCapacity() < 128 << 20);
+    }
+}

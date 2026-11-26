@@ -25,6 +25,9 @@ pub const max_ie_depth = 32;
 /// Deepest chain of conditionals on one line (`.if n .if n ...`).
 pub const max_cond_depth = 32;
 
+/// Deepest table inside the `T{` blocks of tables; a `.TS` below that is
+/// ignored. Each level reads the lines after it again.
+const max_tbl_depth = 2;
 /// Most cells in a table row; further ones are joined into the last.
 pub const max_columns = 64;
 /// Most empty cells added in one page to make short rows as wide as the
@@ -162,6 +165,8 @@ pub const Parser = struct {
     /// Address of a `.UR`/`.MT` opened in a no-fill block.
     code_link: ?[]const u8 = null,
     in_tbl: bool = false,
+    /// Tables being built.
+    tbl_depth: usize = 0,
     /// Between `T{` and `T}` in a table.
     tbl_text_block: bool = false,
     tbl_lines: std.ArrayList([]const u8) = .empty,
@@ -709,6 +714,7 @@ pub const Parser = struct {
                 try self.flushCode();
             },
             .TS => {
+                if (self.tbl_depth >= max_tbl_depth) return;
                 try self.flushCode();
                 self.endPara();
                 self.in_tbl = true;
@@ -1022,6 +1028,8 @@ pub const Parser = struct {
         // may start another table, which must not overwrite these.
         const lines = self.tbl_lines.items;
         self.tbl_lines = .empty;
+        self.tbl_depth += 1;
+        defer self.tbl_depth -= 1;
         // The cells are filled text even inside a no-fill block.
         const nofill = self.nofill;
         self.nofill = false;
