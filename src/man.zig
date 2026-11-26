@@ -19,6 +19,9 @@ const Font = escape.Font;
 /// Deepest `.RS` nesting followed; more is ignored.
 const max_levels = 16;
 
+/// Deepest chain of conditionals on one line (`.if n .if n ...`).
+const max_cond_depth = 32;
+
 const Definition = struct {
     name: []const u8,
     append: bool,
@@ -135,6 +138,7 @@ const Parser = struct {
     expanded_bytes: usize = 0,
     skip_depth: usize = 0,
     last_cond: bool = false,
+    cond_depth: usize = 0,
     /// Indent (columns) used by `.TP`, `.IP` and `.RS` when they give none.
     indent: u16 = 7,
     continued: bool = false,
@@ -484,9 +488,14 @@ const Parser = struct {
         const name = body[0..name_end];
         const rest = std.mem.trimStart(u8, body[name_end..], " \t");
 
-        const args = try splitArgs(self.a, rest);
         // Names that are not built in may be user macros; anything else is ignored.
-        const req = std.meta.stringToEnum(Request, name) orelse return self.callMacro(name, args);
+        const req = std.meta.stringToEnum(Request, name) orelse return self.callMacro(name, try splitArgs(self.a, rest));
+        // A conditional's body is a line of its own: splitting it into arguments
+        // at every level of a chain would take quadratic memory.
+        const args: []const []const u8 = switch (req) {
+            .@"if", .ie, .el => &.{},
+            else => try splitArgs(self.a, rest),
+        };
 
         if (self.nofill) {
             switch (req) {
@@ -697,6 +706,9 @@ const Parser = struct {
 
     /// Runs the body of a conditional if `truth`; skips a `\{ ... \}` block otherwise.
     fn branch(self: *Parser, truth: bool, body: []const u8) Allocator.Error!void {
+        if (self.cond_depth >= max_cond_depth) return;
+        self.cond_depth += 1;
+        defer self.cond_depth -= 1;
         if (std.mem.startsWith(u8, body, "\\{")) {
             const inner = std.mem.trimStart(u8, body[2..], " \t");
             if (truth) {

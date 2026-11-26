@@ -90,3 +90,12 @@ test "BUG-008: strings that expand exponentially stop at a limit" {
     defer testing.allocator.free(out);
     try testing.expect(std.mem.find(u8, out, "done") != null);
 }
+
+test "BUG-009: a long chain of conditionals on one line is cut off" {
+    var big: std.ArrayList(u8) = .empty;
+    defer big.deinit(testing.allocator);
+    for (0..100_000) |_| try big.appendSlice(testing.allocator, ".if n ");
+    try big.appendSlice(testing.allocator, "x\ndone\n");
+    try expect(.man, big.items, "done\n");
+    try expect(.man, ".if n .if n .if n shown\n", "shown\n");
+}
