@@ -341,3 +341,7 @@ test "BUG-040: \\$@ keeps the arguments apart" {
 test "BUG-041: a custom end marker must be the whole name" {
     try expect(.man, ".de X Z\nhidden\n.Zfoo\nstill hidden\n.Z\nshown\n", "shown\n");
 }
+
+test "BUG-042: a .SH without a title does not take the text after the next one" {
+    try expect(.man, ".SH\n.SH B\nbody text\n", "## B\n\n       body text\n");
+}

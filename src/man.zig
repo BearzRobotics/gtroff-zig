@@ -238,6 +238,15 @@ pub const Parser = struct {
         try self.endGroup();
         self.nofill = false;
         self.code_link = null;
+        if (self.pending_heading) |h| {
+            // A heading whose text never came is dropped, with its empty body.
+            self.pending_heading = null;
+            if (h.first_child == null and self.container.first_child == null) {
+                const outer = if (h.level == 3) h.parent.? else self.container;
+                if (h.level != 3) h.unlink();
+                outer.unlink();
+            }
+        }
         self.depth = 0;
         const h = try self.node(.heading);
         h.level = level;
