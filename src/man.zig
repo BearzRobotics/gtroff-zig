@@ -948,6 +948,19 @@ pub const Parser = struct {
         return i;
     }
 
+    /// Whether the request line (without its dot) is a font macro with
+    /// arguments or a call of a user macro.
+    fn printsText(self: *const Parser, request_line: []const u8) bool {
+        const body = std.mem.trim(u8, stripComment(request_line), " \t");
+        const end = std.mem.indexOfAny(u8, body, " \t") orelse body.len;
+        if (self.macros.contains(body[0..end])) return true;
+        const req = std.meta.stringToEnum(Request, body[0..end]) orelse return false;
+        return switch (req) {
+            .B, .I, .SM, .SB, .BR, .BI, .IB, .RB, .IR, .RI => end < body.len,
+            else => false,
+        };
+    }
+
     /// Builds a `table` from the collected tbl(1) lines: options, row formats
     /// (up to a line ending in `.`), then rows of tab separated cells, `_` and
     /// `=` rules, and `T{ ... T}` text blocks. Boxes and rules are not drawn;
@@ -1000,7 +1013,22 @@ pub const Parser = struct {
                 }
                 continue;
             }
-            if (t[0] == '.') continue; // requests between rows (.sp, .ne)
+            // A dot and a digit (`.5`) is data, not a request.
+            if (t[0] == '.' and !(t.len > 1 and std.ascii.isDigit(t[1]))) {
+                // Requests that print text make a row of their own; layout
+                // requests (`.sp`, `.ne`) are skipped.
+                if (!self.printsText(t[1..])) continue;
+                const row = try self.node(.table_row);
+                tbl.appendChild(row);
+                const cell = try self.node(.table_cell);
+                row.appendChild(cell);
+                const saved_para = self.para;
+                self.para = cell;
+                try self.line(l);
+                self.para = saved_para;
+                rows += 1;
+                continue;
+            }
 
             const fmt = active[@min(rows - active_from, active.len - 1)];
             const row = try self.node(.table_row);

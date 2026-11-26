@@ -385,3 +385,12 @@ test "BUG-045: .T& changes the format and is not a row" {
     try testing.expect(std.mem.find(u8, html, "r r") == null);
     try testing.expect(std.mem.find(u8, html, "<td align=\"right\">c</td>\n<td align=\"right\">d</td>") != null);
 }
+
+test "BUG-046: table lines that start with a dot are kept" {
+    const out = try render(.man, ".TS\nl.\n.B boldrow\n.sp\n.5\thalf\nplain\n.TE\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "**boldrow**") != null);
+    try testing.expect(std.mem.find(u8, out, ".5") != null);
+    try testing.expect(std.mem.find(u8, out, "plain") != null);
+    try testing.expect(std.mem.find(u8, out, "sp") == null);
+}
