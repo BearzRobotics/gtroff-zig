@@ -136,6 +136,8 @@ const Parser = struct {
     /// Address of a `.UR`/`.MT` opened in a no-fill block.
     code_link: ?[]const u8 = null,
     in_tbl: bool = false,
+    /// Between `T{` and `T}` in a table.
+    tbl_text_block: bool = false,
     tbl_lines: std.ArrayList([]const u8) = .empty,
     /// While skipping an `.ig` block: the line that ends it.
     skip_end: ?[]const u8 = null,
@@ -620,6 +622,7 @@ const Parser = struct {
                 try self.flushCode();
                 self.endPara();
                 self.in_tbl = true;
+                self.tbl_text_block = false;
                 self.tbl_lines = .empty;
             },
             .TE => {},
@@ -904,12 +907,22 @@ const Parser = struct {
 
     /// Lines between `.TS` and `.TE` are collected; `.TE` builds the table.
     fn tblLine(self: *Parser, l: []const u8) Allocator.Error!void {
-        if (std.mem.startsWith(u8, l, ".TE")) {
-            self.in_tbl = false;
-            try self.buildTable();
-            return;
+        if (std.mem.startsWith(u8, l, ".TE")) return self.endTable();
+        // A section heading means the `.TE` is missing.
+        if (!self.tbl_text_block and (std.mem.startsWith(u8, l, ".SH") or std.mem.startsWith(u8, l, ".SS"))) {
+            try self.endTable();
+            return self.request(l[1..]);
         }
+        const t = std.mem.trim(u8, l, " \t");
+        if (std.mem.startsWith(u8, t, "T}")) self.tbl_text_block = false;
+        if (std.mem.endsWith(u8, t, "T{")) self.tbl_text_block = true;
         try self.tbl_lines.append(self.a, l);
+    }
+
+    fn endTable(self: *Parser) Allocator.Error!void {
+        if (!self.in_tbl) return;
+        self.in_tbl = false;
+        try self.buildTable();
     }
 
     const ColSpec = struct { letter: u8 = 'l', bold: bool = false, italic: bool = false };
@@ -1199,6 +1212,7 @@ pub fn parseOptions(gpa: Allocator, source: []const u8, options: Options) Alloca
     var p: Parser = .{ .a = a, .root = root, .container = root, .cur = root, .st = try escape.State.init(a), .keep_comments = options.keep_comments };
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
+    try p.endTable();
     try p.flushCode();
     return .{ .arena = arena, .root = root };
 }

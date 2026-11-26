@@ -241,3 +241,13 @@ test "BUG-023: headings, tables and links in no-fill blocks stay in order" {
     try testing.expect(before < cell and cell < std.mem.find(u8, out, "after").?);
     try expect(.man, ".nf\nsee\n.UR http://x.example\n.UE .\nend\n.fi\n", "see <http://x.example>.\nend\n");
 }
+
+test "BUG-024: a table without .TE does not drop the rest of the page" {
+    const out = try render(.man, ".SH A\n.TS\nl.\nx\n.SH IMPORTANT\nlots of text\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "x") != null);
+    try testing.expect(std.mem.find(u8, out, "## IMPORTANT\n\n       lots of text") != null);
+    const eof = try render(.man, ".TS\nl.\nlast-row\n");
+    defer testing.allocator.free(eof);
+    try testing.expect(std.mem.find(u8, eof, "last-row") != null);
+}
