@@ -481,3 +481,7 @@ test "BUG-061: reference titles are italic and three names take a serial comma" 
     try expect(.mdoc, ".Ex -std a b c\n", "The **a**, **b**, and **c** utilities exit 0 on success, and >0 if an error occurs.\n");
     try expect(.mdoc, ".Rs\n.%A X\n.%T Title\n.Re\n", "X, _Title_.\n");
 }
+
+test "BUG-063: .Sm off keeps the blank before the next word" {
+    try expect(.mdoc, ".Op Fl L Sm off Ar port : Ar host Sm on\n", "[**-L** _port_:_host_]\n");
+}

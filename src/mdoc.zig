@@ -228,6 +228,8 @@ const Parser = struct {
     xo_inline: bool = false,
     /// `.Sm off` removes the spaces between words until `.Sm on`.
     spacing: bool = true,
+    /// The blank before the next word was due when spacing went off.
+    owed_space: bool = false,
     rs: ?Reference = null,
     line_no: u32 = 0,
     keep_comments: bool = false,
@@ -280,12 +282,21 @@ const Parser = struct {
         return .{ .top = inner, .leaf = leaf };
     }
 
+    /// `.Sm on`, `.Sm off`, or a toggle when `on` is null. The blank already due
+    /// after the last word stays when spacing goes off.
+    fn setSpacing(self: *Parser, on: ?bool) void {
+        const next = on orelse !self.spacing;
+        if (self.spacing and !next) self.owed_space = self.space;
+        self.spacing = next;
+    }
+
     /// Writes already escaped `text` to the target, with a leading space if one
     /// is due and `glue_before` is false. `glue_after` keeps the next word
     /// attached (after an opening bracket).
     fn emit(self: *Parser, text: []const u8, font: Font, glue_before: bool, glue_after: bool) Allocator.Error!void {
         if (text.len == 0) return;
-        const lead = self.space and !glue_before and self.spacing;
+        const lead = (self.space and !glue_before and self.spacing) or (self.owed_space and !glue_before);
+        self.owed_space = false;
         const f: Font = if (font.eql(.roman)) self.base_font else font;
         if (self.last_leaf) |leaf| {
             if (self.target.last_child == self.last_top and self.last_font.eql(f)) {
@@ -470,11 +481,11 @@ const Parser = struct {
             },
             .Sm => {
                 if (args.len > 0) {
-                    if (std.mem.eql(u8, args[0].text, "off")) self.spacing = false;
-                    if (std.mem.eql(u8, args[0].text, "on")) self.spacing = true;
+                    if (std.mem.eql(u8, args[0].text, "off")) self.setSpacing(false);
+                    if (std.mem.eql(u8, args[0].text, "on")) self.setSpacing(true);
                     return start + 1;
                 }
-                self.spacing = !self.spacing;
+                self.setSpacing(null);
             },
             .Ev, .Er, .Dv, .Ms, .Tn, .Sx, .No => try self.styled(.roman, args, ""),
             .Ok => {},
@@ -1012,9 +1023,11 @@ const Parser = struct {
     fn block(self: *Parser, b: Block, args: []const Word) Allocator.Error!void {
         switch (b) {
             .Sm => {
-                if (args.len > 0 and std.mem.eql(u8, args[0].text, "off")) self.spacing = false;
-                if (args.len > 0 and std.mem.eql(u8, args[0].text, "on")) self.spacing = true;
-                if (args.len == 0) self.spacing = !self.spacing;
+                if (args.len == 0) {
+                    self.setSpacing(null);
+                } else if (std.mem.eql(u8, args[0].text, "off")) {
+                    self.setSpacing(false);
+                } else if (std.mem.eql(u8, args[0].text, "on")) self.setSpacing(true);
             },
             .Dd, .Os, .Db, .Bk, .Ek, .Hf, .Tg => {},
             .Dt => {
