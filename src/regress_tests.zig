@@ -290,3 +290,17 @@ test "BUG-031: an .Xo still open at the end of the page keeps its words" {
     defer testing.allocator.free(out);
     try testing.expect(std.mem.find(u8, out, "**-a** kept words") != null);
 }
+
+test "BUG-032: column list cells stay in their rows" {
+    var doc = try gtroff.parseMdoc(testing.allocator, ".Bl -column a b c\n.It x\n.It a Ta b Ta KEEPME\n.It one\ttwo\n.It first\n.Ta second\n.El\nafter\n");
+    defer doc.deinit();
+    const html = try doc.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(html);
+    for ([_][]const u8{
+        "<td>x</td>\n<td></td>\n<td></td>",
+        "<td>a</td>\n<td>b</td>\n<td>KEEPME</td>",
+        "<td>one</td>\n<td>two</td>",
+        "<td>first</td>\n<td>second</td>",
+        "<p>after</p>",
+    }) |want| try testing.expect(std.mem.find(u8, html, want) != null);
+}

@@ -163,6 +163,8 @@ const Ctx = struct {
     /// Where blocks were added before the list started.
     parent: *Node,
     item_open: bool = false,
+    /// The last row of a `-column` list.
+    row: ?*Node = null,
     /// Columns for the tag of a `-tag` list (`-width`).
     width: u16 = 6,
 };
@@ -710,14 +712,16 @@ const Parser = struct {
     }
 
     fn closeAllLists(self: *Parser) Allocator.Error!void {
-        while (self.depth > 0) self.popList();
+        while (self.depth > 0) try self.popList();
         self.bd_literal = false;
         try self.flushCode();
     }
 
-    fn popList(self: *Parser) void {
+    fn popList(self: *Parser) Allocator.Error!void {
         if (self.depth == 0) return;
         self.depth -= 1;
+        // The renderer sizes a table from its first row.
+        if (self.stack[self.depth].kind == .column) try man.padRows(self.a, self.stack[self.depth].list, &self.padded_cells);
         self.cur = self.stack[self.depth].parent;
         self.endPara();
     }
@@ -792,23 +796,40 @@ const Parser = struct {
             .column => {
                 const row = try self.node(.table_row);
                 ctx.list.appendChild(row);
-                var start: usize = 0;
-                var i: usize = 0;
-                while (i <= args.len) : (i += 1) {
-                    if (i < args.len and !(std.mem.eql(u8, args[i].text, "Ta") and !args[i].quoted)) continue;
-                    const cell = try self.node(.table_cell);
-                    row.appendChild(cell);
-                    const saved = self.target;
-                    self.target = cell;
-                    self.space = false;
-                    try self.parse(args[start..i]);
-                    self.target = saved;
-                    start = i + 1;
-                }
+                ctx.row = row;
+                try self.addCells(row, args);
             },
         }
         ctx.item_open = true;
         self.space = false;
+    }
+
+    /// Adds the cells of `args`, separated by `Ta`, to a column list row. The
+    /// lines that follow go on in the last of them.
+    fn addCells(self: *Parser, row: *Node, args: []const Word) Allocator.Error!void {
+        var count: usize = 0;
+        var c = row.first_child;
+        while (c) |x| : (c = x.next) count += 1;
+        var start: usize = 0;
+        var i: usize = 0;
+        while (i <= args.len) : (i += 1) {
+            if (i < args.len and !(std.mem.eql(u8, args[i].text, "Ta") and !args[i].quoted and count + 1 < man.max_columns)) continue;
+            // At the limit, further text joins the last cell.
+            const cell = if (count < man.max_columns) blk: {
+                const new = try self.node(.table_cell);
+                row.appendChild(new);
+                count += 1;
+                break :blk new;
+            } else row.last_child.?;
+            const saved = self.target;
+            self.target = cell;
+            self.space = false;
+            try self.parse(args[start..i]);
+            self.target = saved;
+            start = i + 1;
+        }
+        self.para = row.last_child;
+        self.target = row.last_child.?;
     }
 
     fn flushCode(self: *Parser) Allocator.Error!void {
@@ -943,6 +964,10 @@ const Parser = struct {
     fn lineWords(self: *Parser, words: []const Word, from_xo: bool) Allocator.Error!void {
         if (words.len == 0) return;
         const first = words[0];
+        // `.Ta` at the start of a line adds cells to the row above.
+        if (!first.quoted and std.mem.eql(u8, first.text, "Ta") and self.depth > 0) {
+            if (self.stack[self.depth - 1].row) |row| return self.addCells(row, words[1..]);
+        }
         if (!first.quoted and !from_xo) {
             if (std.meta.stringToEnum(Block, first.text)) |b| return self.block(b, words[1..]);
         }
@@ -994,7 +1019,7 @@ const Parser = struct {
                 try self.parse(args);
             },
             .Bl => try self.startList(args),
-            .El => self.popList(),
+            .El => try self.popList(),
             .It => try self.item(args),
             .Bd => {
                 self.endPara();
@@ -1246,7 +1271,9 @@ const Parser = struct {
             // An empty request, or one such as `.\\}` that only closes a block.
             if (body.len == 0 or body[0] == '\\') return;
             if (try self.roffRequest(body)) return;
-            words = try splitWords(self.a, body);
+            const in_columns = self.depth > 0 and self.stack[self.depth - 1].kind == .column;
+            // In a column list a tab also separates cells.
+            words = try splitWords(self.a, if (in_columns and std.mem.startsWith(u8, body, "It")) try tabsToTa(self.a, body) else body);
         }
 
         // `.Xo` ... `.Xc` joins several lines into one macro line.
@@ -1299,6 +1326,20 @@ const Parser = struct {
         try self.textLine(l);
     }
 };
+
+/// `.It` line with each tab between two cells written as `Ta`.
+fn tabsToTa(a: Allocator, body: []const u8) Allocator.Error![]const u8 {
+    if (body.len < 3) return body;
+    const rest = std.mem.trim(u8, body[2..], " \t");
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(a, "It ");
+    var quoted = false;
+    for (rest) |c| {
+        if (c == '"') quoted = !quoted;
+        if (c == '\t' and !quoted) try out.appendSlice(a, " Ta ") else try out.append(a, c);
+    }
+    return out.items;
+}
 
 /// Splits a macro line into words; a leading double quote starts a quoted word
 /// (`""` inside is one quote).
