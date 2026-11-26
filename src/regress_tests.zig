@@ -53,3 +53,9 @@ test "BUG-003: a long run of enclosure macros does not overflow the stack" {
     defer testing.allocator.free(out);
     try testing.expect(std.mem.find(u8, out, "x") != null);
 }
+
+test "BUG-004: a false block closed on its own line does not drop the rest of the page" {
+    try expect(.man, ".if t \\{ typeset \\}\nkept\n", "kept\n");
+    try expect(.man, ".if t \\{\\\n.\\}\nkept\n", "kept\n");
+    try expect(.man, ".if t \\{\n.if n \\{ x \\}\nhidden\n.\\}\nkept\n", "kept\n");
+}

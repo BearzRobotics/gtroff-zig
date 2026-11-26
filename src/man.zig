@@ -684,25 +684,35 @@ const Parser = struct {
             if (truth) {
                 if (inner.len > 0) try self.line(inner);
             } else {
-                self.skip_depth = 1 + braceDelta(inner);
+                self.skip_depth = skipBraces(inner, 1);
             }
         } else if (truth and body.len > 0) {
             try self.line(body);
         }
     }
 
-    /// Opening braces minus closing braces on a line.
-    fn braceDelta(l: []const u8) usize {
-        // Only used when skipping; a negative result cannot be represented and
-        // is clamped by the caller (skip_depth stops at 0).
-        var opens: usize = 0;
-        var closes: usize = 0;
+    /// Follows the `\\{` and `\\}` on a skipped line, starting `open` blocks
+    /// deep. Returns how many are still open; 0 ends the skipping, and the rest
+    /// of that line is dropped with the block.
+    pub fn skipBraces(l: []const u8, open: usize) usize {
+        var depth = open;
         var i: usize = 0;
         while (i + 1 < l.len) : (i += 1) {
-            if (l[i] == '\\' and l[i + 1] == '{') opens += 1;
-            if (l[i] == '\\' and l[i + 1] == '}') closes += 1;
+            if (l[i] != '\\') continue;
+            if (l[i + 1] == '{') depth += 1;
+            if (l[i + 1] == '}') {
+                depth -= 1;
+                if (depth == 0) return 0;
+            }
+            i += 1; // the escaped character, which may be a backslash
         }
-        return if (opens >= closes) opens - closes else 0;
+        return depth;
+    }
+
+    /// True when `l` has more `\\}` than `\\{`.
+    pub fn closesBlock(l: []const u8) bool {
+        // Starting deep enough that the count cannot reach zero.
+        return skipBraces(l, l.len + 1) < l.len + 1;
     }
 
     // ---- lines -------------------------------------------------------------
@@ -727,18 +737,12 @@ const Parser = struct {
             return;
         }
         if (self.skip_depth > 0) {
-            var i: usize = 0;
-            while (i + 1 < l.len) : (i += 1) {
-                if (l[i] == '\\' and l[i + 1] == '{') self.skip_depth += 1;
-                if (l[i] == '\\' and l[i + 1] == '}') {
-                    self.skip_depth -= 1;
-                    if (self.skip_depth == 0) break;
-                }
-            }
+            self.skip_depth = skipBraces(l, self.skip_depth);
             return;
         }
         // The end of a taken conditional block.
-        if (std.mem.endsWith(u8, l, "\\}")) l = l[0 .. l.len - 2];
+        // Not when the line also opens that block: `branch` needs to see both.
+        if (std.mem.endsWith(u8, l, "\\}") and closesBlock(l)) l = l[0 .. l.len - 2];
         if (std.mem.eql(u8, std.mem.trim(u8, l, " \t"), ".")) return;
 
         if (self.keep_comments and !self.nofill) {
