@@ -1016,8 +1016,9 @@ const Parser = struct {
         self.target = p;
         try self.lineSep(false);
         self.space = false;
-        const words = try splitWords(self.a, l);
-        for (words) |w| try self.plainWord(w);
+        // The whole line at once: escapes may span blanks, and fonts must stay.
+        const r = try escape.segments(self.a, &self.st, std.mem.trimEnd(u8, l, " \t"));
+        for (r.segments) |seg| try self.emit(seg.text, seg.font, true, false);
     }
 
     fn line(self: *Parser, raw: []const u8) Allocator.Error!void {
@@ -1119,7 +1120,14 @@ fn splitWords(a: Allocator, s: []const u8) Allocator.Error![]Word {
             }
             try out.append(a, .{ .text = buf.items, .quoted = true });
         } else {
-            while (i < s.len and s[i] != ' ' and s[i] != '\t') : (i += 1) try buf.append(a, s[i]);
+            while (i < s.len and s[i] != ' ' and s[i] != '\t') : (i += 1) {
+                // An escaped character, even a blank, belongs to the word.
+                if (s[i] == '\\' and i + 1 < s.len) {
+                    try buf.append(a, s[i]);
+                    i += 1;
+                }
+                try buf.append(a, s[i]);
+            }
             try out.append(a, .{ .text = buf.items });
         }
     }

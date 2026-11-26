@@ -255,3 +255,8 @@ test "BUG-024: a table without .TE does not drop the rest of the page" {
 test "BUG-025: mdoc end of line comments are not printed" {
     try expect(.mdoc, ".Fl a \\\" SECRET COMMENT\ntext \\\" HIDDEN WORDS\n", "**-a** text\n");
 }
+
+test "BUG-026: mdoc text lines keep fonts and non-breaking blanks" {
+    try expect(.mdoc, "\\fBbold words\\fR and a\\ b\n", "**bold words** and a\u{a0}b\n");
+    try expect(.mdoc, ".No a\\ b\n", "a\u{a0}b\n");
+}
