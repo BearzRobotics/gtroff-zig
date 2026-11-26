@@ -485,3 +485,7 @@ test "BUG-061: reference titles are italic and three names take a serial comma" 
 test "BUG-063: .Sm off keeps the blank before the next word" {
     try expect(.mdoc, ".Op Fl L Sm off Ar port : Ar host Sm on\n", "[**-L** _port_:_host_]\n");
 }
+
+test "BUG-067: mdoc conditionals see the registers the page sets" {
+    try expect(.mdoc, ".nr SL 1\n.if \\n(SL \\{\\\nshown\n.\\}\n.rr SL\n.if \\n(SL hidden\n", "shown\n");
+}

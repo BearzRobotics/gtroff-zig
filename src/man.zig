@@ -771,7 +771,7 @@ pub const Parser = struct {
             .ig => self.skip_end = if (args.len > 0) try std.fmt.allocPrint(self.a, ".{s}", .{args[0]}) else "..",
             .@"if", .ie => try self.conditional(rest, req == .ie),
             .el => try self.elseBranch(rest),
-            .nr => try self.setRegister(args),
+            .nr => try setRegister(self.a, &self.st, args),
             .rr => if (args.len > 0) {
                 _ = self.st.regs.remove(args[0]);
             },
@@ -799,16 +799,6 @@ pub const Parser = struct {
             self.ie_count += 1;
         }
         try self.branch(truth, std.mem.trimStart(u8, r.rest, " \t"));
-    }
-
-    /// `.nr name value`: a leading `+` or `-` changes the register by that much.
-    fn setRegister(self: *Parser, args: []const []const u8) Allocator.Error!void {
-        if (args.len < 2) return;
-        const text = try escape.interpolate(self.a, &self.st, args[1]);
-        const relative = text.len > 0 and (text[0] == '+' or text[0] == '-');
-        const v = expr.eval(text) catch return;
-        const old = self.st.regs.get(args[0]) orelse 0;
-        try self.st.regs.put(self.a, try self.a.dupe(u8, args[0]), if (relative) old +| v else v);
     }
 
     fn elseBranch(self: *Parser, rest: []const u8) Allocator.Error!void {
@@ -1245,6 +1235,16 @@ pub fn defineString(a: Allocator, st: *escape.State, rest: []const u8) Allocator
     var value = std.mem.trimStart(u8, rest[end..], " \t");
     if (value.len > 0 and value[0] == '"') value = value[1..];
     if (end > 0) try st.strings.put(a, rest[0..end], value);
+}
+
+/// `.nr name value`: a leading `+` or `-` changes the register by that much.
+pub fn setRegister(a: Allocator, st: *escape.State, args: []const []const u8) Allocator.Error!void {
+    if (args.len < 2) return;
+    const text = try escape.interpolate(a, st, args[1]);
+    const relative = text.len > 0 and (text[0] == '+' or text[0] == '-');
+    const v = expr.eval(text) catch return;
+    const old = st.regs.get(args[0]) orelse 0;
+    try st.regs.put(a, try a.dupe(u8, args[0]), if (relative) old +| v else v);
 }
 
 /// The text of a whole-line comment (`.\" text`, `\" text`), or null.

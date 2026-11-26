@@ -1134,7 +1134,7 @@ const Parser = struct {
         }
         const name = body[0..name_end];
         const rest = std.mem.trimStart(u8, body[name_end..], " \t");
-        const Roff = enum { ig, de, de1, am, am1, ds, @"if", ie, el, br, sp, nf, fi, TS };
+        const Roff = enum { ig, de, de1, am, am1, ds, nr, rr, @"if", ie, el, br, sp, nf, fi, TS };
         const req = std.meta.stringToEnum(Roff, name) orelse {
             const user_macro = self.macros.get(name) orelse return false;
             try self.callMacro(user_macro, try man.splitArgs(self.a, rest));
@@ -1159,6 +1159,11 @@ const Parser = struct {
                 } else self.def = .{ .name = args[0], .append = req == .am or req == .am1, .end = end };
             },
             .ds => try man.defineString(self.a, &self.st, rest),
+            .nr => try man.setRegister(self.a, &self.st, try man.splitArgs(self.a, rest)),
+            .rr => {
+                const args = try man.splitArgs(self.a, rest);
+                if (args.len > 0) _ = self.st.regs.remove(args[0]);
+            },
             .br => if (self.para) |p| {
                 if (self.target == p) try self.lineSep(true);
             },
