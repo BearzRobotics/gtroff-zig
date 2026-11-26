@@ -99,3 +99,27 @@ test "BUG-009: a long chain of conditionals on one line is cut off" {
     try expect(.man, big.items, "done\n");
     try expect(.man, ".if n .if n .if n shown\n", "shown\n");
 }
+
+test "BUG-010: table rows and padding are bounded" {
+    var big: std.ArrayList(u8) = .empty;
+    defer big.deinit(testing.allocator);
+    try big.appendSlice(testing.allocator, ".TS\nl.\na");
+    for (0..2000) |_| try big.append(testing.allocator, '\t');
+    try big.appendSlice(testing.allocator, "z\n");
+    for (0..2000) |_| try big.appendSlice(testing.allocator, "x\n");
+    try big.appendSlice(testing.allocator, ".TE\n");
+    var doc = try gtroff.parseMan(testing.allocator, big.items);
+    defer doc.deinit();
+    var walker = md.Walker.init(doc.root);
+    var cells: usize = 0;
+    var last_text: []const u8 = "";
+    while (walker.next()) |ev| {
+        if (!ev.entering) continue;
+        if (ev.node.kind == .table_cell) cells += 1;
+        if (ev.node.kind == .text and std.mem.endsWith(u8, ev.node.literal, "z")) last_text = ev.node.literal;
+    }
+    // 2001 rows of at least one cell, the first with 64, and bounded padding.
+    try testing.expect(cells <= 2001 + 63 + (1 << 16));
+    // Text past the last column is kept.
+    try testing.expect(last_text.len > 0);
+}

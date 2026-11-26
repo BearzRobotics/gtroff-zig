@@ -22,6 +22,12 @@ const max_levels = 16;
 /// Deepest chain of conditionals on one line (`.if n .if n ...`).
 const max_cond_depth = 32;
 
+/// Most cells in a table row; further ones are joined into the last.
+pub const max_columns = 64;
+/// Most empty cells added in one page to make short rows as wide as the
+/// widest. Without a limit the tree grows as rows times columns.
+pub const max_padded_cells = 1 << 16;
+
 const Definition = struct {
     name: []const u8,
     append: bool,
@@ -135,6 +141,7 @@ const Parser = struct {
     def: ?Definition = null,
     macro_depth: usize = 0,
     expanded_lines: usize = 0,
+    padded_cells: usize = 0,
     expanded_bytes: usize = 0,
     skip_depth: usize = 0,
     last_cond: bool = false,
@@ -939,7 +946,7 @@ const Parser = struct {
                 };
                 row.appendChild(cell);
 
-                const tab_pos = std.mem.indexOfScalar(u8, rest, tab);
+                const tab_pos = if (col + 1 < max_columns) std.mem.indexOfScalar(u8, rest, tab) else null;
                 const piece = std.mem.trim(u8, if (tab_pos) |p| rest[0..p] else rest, " ");
                 if (std.mem.endsWith(u8, piece, "T{")) {
                     // A text block runs to the line that starts with `T}`.
@@ -985,21 +992,7 @@ const Parser = struct {
         if (rows == 0) return;
         // Rows can have different numbers of cells (spans, short header rows);
         // the renderer sizes the table from its first row, so pad every row.
-        var widest: usize = 0;
-        var r = tbl.first_child;
-        while (r) |row| : (r = row.next) {
-            var n: usize = 0;
-            var c = row.first_child;
-            while (c) |_| : (c = c.?.next) n += 1;
-            widest = @max(widest, n);
-        }
-        r = tbl.first_child;
-        while (r) |row| : (r = row.next) {
-            var n: usize = 0;
-            var c = row.first_child;
-            while (c) |_| : (c = c.?.next) n += 1;
-            while (n < widest) : (n += 1) row.appendChild(try self.node(.table_cell));
-        }
+        try padRows(self.a, tbl, &self.padded_cells);
         if (tbl.first_child) |first| {
             var bold_first = true;
             for (formats.items[0]) |c| if (!c.bold) {
@@ -1011,6 +1004,33 @@ const Parser = struct {
         self.cur.appendChild(tbl);
     }
 };
+
+/// Adds empty cells until every row of `tbl` is as wide as the widest, within
+/// `max_padded_cells` (`used` counts them for the page). Rows are padded in
+/// order, so the first one, which sizes the rendered table, comes first.
+pub fn padRows(a: Allocator, tbl: *Node, used: *usize) Allocator.Error!void {
+    var widest: usize = 0;
+    var r = tbl.first_child;
+    while (r) |row| : (r = row.next) widest = @max(widest, countChildren(row));
+    r = tbl.first_child;
+    while (r) |row| : (r = row.next) {
+        var n = countChildren(row);
+        while (n < widest and used.* < max_padded_cells) : (n += 1) {
+            const cell = try a.create(Node);
+            cell.* = .{ .kind = .table_cell, .line = row.line };
+            cell.build.open = false;
+            row.appendChild(cell);
+            used.* += 1;
+        }
+    }
+}
+
+fn countChildren(n: *const Node) usize {
+    var count: usize = 0;
+    var c = n.first_child;
+    while (c) |x| : (c = x.next) count += 1;
+    return count;
+}
 
 /// The text of a whole-line comment (`.\" text`, `\" text`), or null.
 pub fn commentBody(l: []const u8) ?[]const u8 {
