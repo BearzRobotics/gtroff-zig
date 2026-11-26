@@ -262,9 +262,17 @@ pub fn segments(a: Allocator, st: *State, line_in: []const u8) Allocator.Error!R
             '.' => try buf.append(a, '.'),
             '\'' => try buf.append(a, '\''),
             '`' => try buf.append(a, '`'),
-            ' ', '~' => try buf.appendSlice(a, "\u{00a0}"),
-            '&', '|', '^', '/', ',', ':', '%', '!', '?' => {},
-            '"' => i = line.len, // comment to the end of the line
+            // `\\0` is a blank as wide as a digit.
+            ' ', '~', '0' => try buf.appendSlice(a, "\u{00a0}"),
+            // Zero width marks, block braces, and `\\z`, which only stops the
+            // character after it from advancing.
+            '&', '|', '^', '/', ',', ':', '%', '!', '?', ')', '{', '}', 'z' => {},
+            '"', '#' => i = line.len, // comment to the end of the line
+            'F', 'g', 'k', 'm', 'M', 'V', 'Y' => {
+                // Escapes that take a name.
+                const nm = readName(line[i..]) orelse break;
+                i += nm.used;
+            },
             'c' => {
                 if (i >= line.len) continued = true;
             },
@@ -312,6 +320,11 @@ pub fn segments(a: Allocator, st: *State, line_in: []const u8) Allocator.Error!R
             's' => {
                 // Size change: \s0, \s+2, \s-1, \s12, \s(12
                 if (i < line.len and (line[i] == '+' or line[i] == '-')) i += 1;
+                if (i < line.len and (line[i] == '[' or line[i] == '\'')) {
+                    const close: u8 = if (line[i] == '[') ']' else '\'';
+                    i = if (std.mem.indexOfScalarPos(u8, line, i + 1, close)) |end| end + 1 else line.len;
+                    continue;
+                }
                 if (i < line.len and line[i] == '(') i += 1;
                 var digits: usize = 0;
                 while (i < line.len and std.ascii.isDigit(line[i]) and digits < 2) : (digits += 1) i += 1;
@@ -319,7 +332,7 @@ pub fn segments(a: Allocator, st: *State, line_in: []const u8) Allocator.Error!R
             // Superscript, subscript, reverse motion and similar take no argument.
             'u', 'd', 'r', 'p', 'a' => {},
             't' => try buf.append(a, ' '),
-            'm', 'M', 'k', 'z', 'Z', 'b', 'o', 'w', 'X', 'v', 'h', 'l', 'L', 'D', 'H', 'S', 'C', 'N', 'R', 'x' => {
+            'Z', 'b', 'o', 'w', 'X', 'v', 'h', 'l', 'L', 'D', 'H', 'S', 'C', 'N', 'R', 'x' => {
                 // Drawing, motion and other typesetting escapes with a quoted
                 // or named argument. Skip the argument so it is not printed.
                 if (i < line.len and (line[i] == '\'')) {

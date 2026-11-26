@@ -212,3 +212,9 @@ test "BUG-017: .el needs no blank before \\{" {
 test "BUG-018: a comment ending in a backslash does not swallow the next line" {
     try expect(.man, ".\\\" trailing \\\nnext\nkept\n", "next kept\n");
 }
+
+test "BUG-019: common escapes do not print their letters or arguments" {
+    try expect(.man, "a\\0b c\\#d hidden\n", "a\u{a0}b c\n");
+    try expect(.man, "A\\m(rdB \\F[CW]C \\s[12]D \\s'12'E \\kxG \\)H\\{\\}\n", "AB C D E G H\n");
+    try expect(.man, "\\z\\(emF\n", "\u{2014}F\n");
+}
