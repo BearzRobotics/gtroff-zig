@@ -41,14 +41,32 @@ pub const Segment = struct {
     font: Font,
 };
 
+/// Most bytes (plus one for each use) that `.ds` strings may expand to in one
+/// page. A string naming itself k times would otherwise grow as k^8.
+const max_pasted = 4 << 20;
+
 /// State that outlives one line: the current and previous font, and the
 /// string registers defined with `.ds`.
 pub const State = struct {
     font: Font = .roman,
     prev: Font = .roman,
     strings: std.StringHashMapUnmanaged([]const u8) = .empty,
+    /// Used part of `max_pasted`.
+    pasted: usize = 0,
     /// Number registers (`.nr`, `\\n[x]`).
     regs: std.StringHashMapUnmanaged(i64) = .empty,
+
+    /// The value of the page's string `name` charged to the expansion budget:
+    /// null if there is no such string, empty once the budget is spent.
+    fn useString(self: *State, name: []const u8) ?[]const u8 {
+        const v = self.strings.get(name) orelse return null;
+        if (v.len >= max_pasted - self.pasted) {
+            self.pasted = max_pasted;
+            return "";
+        }
+        self.pasted += v.len + 1;
+        return v;
+    }
 
     /// A state with the registers and strings groff predefines that pages test.
     pub fn init(a: Allocator) Allocator.Error!State {
@@ -164,7 +182,7 @@ fn pasteStrings(a: Allocator, st: *State, line: []const u8, depth: u8) Allocator
             try out.appendSlice(a, line[i..]);
             break;
         };
-        if (st.strings.get(nm.name)) |v| {
+        if (st.useString(nm.name)) |v| {
             try out.appendSlice(a, try pasteStrings(a, st, v, depth + 1));
         } else {
             // Predefined or unknown: left for `segments`.
@@ -231,7 +249,7 @@ pub fn segments(a: Allocator, st: *State, line_in: []const u8) Allocator.Error!R
             '*' => {
                 const nm = readName(line[i..]) orelse break;
                 i += nm.used;
-                if (st.strings.get(nm.name)) |v| {
+                if (st.useString(nm.name)) |v| {
                     try buf.appendSlice(a, v);
                 } else if (builtinString(nm.name)) |v| {
                     try buf.appendSlice(a, v);
@@ -362,7 +380,7 @@ pub fn interpolate(a: Allocator, st: *State, s: []const u8) Allocator.Error![]co
                     gop.value_ptr.* += delta;
                 }
                 try out.print(a, "{d}", .{st.regs.get(nm.name) orelse 0});
-            } else if (st.strings.get(nm.name)) |v| {
+            } else if (st.useString(nm.name)) |v| {
                 try out.appendSlice(a, v);
             } else if (builtinString(nm.name)) |v| {
                 try out.appendSlice(a, v);

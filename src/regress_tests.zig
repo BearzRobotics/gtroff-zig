@@ -84,3 +84,9 @@ test "BUG-007: macro arguments that double at each level stop at a byte limit" {
 test "BUG-007: a macro may append to itself while it runs" {
     try expect(.man, ".de A\none\n.am A\ntwo\n..\n..\n.am A\n..\n.A\n", "one\n");
 }
+
+test "BUG-008: strings that expand exponentially stop at a limit" {
+    const out = try render(.man, ".ds a " ++ "\\*a\\*a\\*a\\*a\\*a\\*a\\*a\\*a\n\\*a\ndone\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "done") != null);
+}
