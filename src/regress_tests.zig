@@ -427,3 +427,7 @@ test "BUG-053: \\f[] returns to the previous font" {
 test "BUG-054: a bare font macro applies to the next line only" {
     try expect(.man, ".B\n.BR x y\nplain\n", "**x**y plain\n");
 }
+
+test "BUG-055: .RE takes a level" {
+    try expect(.man, "zero\n.RS\n.RS\ndeep\n.RE 1\nback\n", "zero\n\n              deep\n\nback\n");
+}

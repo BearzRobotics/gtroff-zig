@@ -651,7 +651,14 @@ pub const Parser = struct {
                 } else try self.startTagged(args[0], if (args.len > 1) args[1] else null);
             },
             .RS => try self.pushQuote(if (args.len > 0) args[0] else null),
-            .RE => try self.popQuote(),
+            .RE => {
+                // `.RE n` returns to level n; 1 is the level outside any `.RS`.
+                const level = if (args.len > 0) std.fmt.parseInt(usize, args[0], 10) catch 0 else 0;
+                try self.popQuote();
+                if (level > 0) {
+                    while (self.depth >= level) try self.popQuote();
+                }
+            },
             .B => try self.singleFont(Font.b, args),
             .I => try self.singleFont(Font.i, args),
             .SM => try self.singleFont(Font.roman, args),
