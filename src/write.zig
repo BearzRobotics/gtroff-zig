@@ -374,6 +374,10 @@ const Gen = struct {
                     if (at_start) try buf.appendSlice(self.a, "\\&");
                     try buf.append(self.a, c);
                 },
+                // Text must never start a line: a newline from `&#10;` would
+                // let what follows it be read as a request.
+                '\n', '\r' => try buf.append(self.a, ' '),
+                0...8, 11, 12, 14...31, 127 => continue,
                 else => try buf.append(self.a, c),
             }
             at_start = false;

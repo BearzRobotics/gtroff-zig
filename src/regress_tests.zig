@@ -137,3 +137,21 @@ test "BUG-011: a long mdoc line takes linear memory" {
     defer testing.allocator.free(out);
     try testing.expectEqual(@as(usize, 20_000 * 5), out.len);
 }
+
+fn writeFrom(doc_in: anytype, options: gtroff.WriteOptions) ![]u8 {
+    var doc = try doc_in;
+    defer doc.deinit();
+    return gtroff.toManAlloc(testing.allocator, &doc, options);
+}
+
+fn markdown(src: []const u8) !md.Document {
+    return md.Document.parse(testing.allocator, src, .{ .extensions = md.Extensions.all });
+}
+
+test "BUG-012: text cannot start a request line" {
+    const out = try writeFrom(markdown("hello&#10;.so /etc/hostname\n\n`a`&#13;'br\n"), .{});
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "\n.so") == null);
+    try testing.expect(std.mem.find(u8, out, "hello .so /etc/hostname\n") != null);
+    try testing.expect(std.mem.findScalar(u8, out, '\r') == null);
+}
