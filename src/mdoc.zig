@@ -380,7 +380,7 @@ const Parser = struct {
     /// Arguments in one font; delimiters stay roman.
     fn styled(self: *Parser, font: Font, args: []const Word, prefix: []const u8) Allocator.Error!void {
         for (args) |arg| {
-            if (isOpening(arg) or isClosing(arg)) {
+            if (isOpening(arg) or isClosing(arg) or (!arg.quoted and std.mem.eql(u8, arg.text, "|"))) {
                 try self.plainWord(arg);
                 continue;
             }

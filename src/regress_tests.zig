@@ -394,3 +394,7 @@ test "BUG-046: table lines that start with a dot are kept" {
     try testing.expect(std.mem.find(u8, out, "plain") != null);
     try testing.expect(std.mem.find(u8, out, "sp") == null);
 }
+
+test "BUG-047: | is a delimiter, not a flag" {
+    try expect(.mdoc, ".Op Fl a | b\n", "[**-a** | **-b**]\n");
+}
