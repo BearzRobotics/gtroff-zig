@@ -8,7 +8,7 @@
 //! (`.Ex`, `.Rv`, `.St`, `.At`, `.Bx`, ...).
 //!
 //! Not supported (silently skipped): `.Sm`/`.Db` spacing modes, `.Bk`, column
-//! widths and offsets, `.Eo`/`.Ec` custom delimiters, `.Hf`, `.Tg`.
+//! widths and offsets, `.Hf`, `.Tg`.
 
 const std = @import("std");
 const md = @import("md");
@@ -480,7 +480,19 @@ const Parser = struct {
                 self.spacing = !self.spacing;
             },
             .Ev, .Er, .Dv, .Ms, .Tn, .Sx, .No => try self.styled(.roman, args, ""),
-            .Ok, .Fr, .En, .Es, .Eo, .Ec, .Ud => {},
+            .Ok => {},
+            .Fr, .En, .Es => try self.styled(.roman, args, ""),
+            // Custom enclosure: the first argument of each is the delimiter.
+            .Eo => for (args, 0..) |arg, k| {
+                try self.emit(try self.clean(arg.text), .roman, false, k == 0);
+            },
+            .Ec => for (args, 0..) |arg, k| {
+                try self.emit(try self.clean(arg.text), .roman, k == 0, false);
+            },
+            .Ud => {
+                try self.emit("currently under development.", .roman, false, false);
+                for (args) |d| try self.plainWord(d);
+            },
 
             // Spacing.
             .Ns => {

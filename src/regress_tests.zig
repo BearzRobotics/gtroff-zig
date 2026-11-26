@@ -398,3 +398,7 @@ test "BUG-046: table lines that start with a dot are kept" {
 test "BUG-047: | is a delimiter, not a flag" {
     try expect(.mdoc, ".Op Fl a | b\n", "[**-a** | **-b**]\n");
 }
+
+test "BUG-048: .Eo, .Ec, .En and .Ud keep their text" {
+    try expect(.mdoc, ".Eo ( inside Ec )\n.Pp\n.Ud\n.Pp\n.En word\n", "(inside)\n\ncurrently under development.\n\nword\n");
+}
