@@ -314,3 +314,9 @@ test "BUG-033: a first heading with parentheses is not lost" {
     defer testing.allocator.free(out);
     try testing.expect(std.mem.startsWith(u8, out, ".TH \"Using foo() safely\" \"7\"\n"));
 }
+
+test "BUG-037: conditions may have blanks inside parentheses" {
+    try expect(.man, ".if (1 > 0) shown\n.if ( 1 > 2 ) hidden\nend\n", "shown end\n");
+    try testing.expectEqual(@as(i64, 6), try gtroff.expr.eval("( ( 1 + 2 ) * 2 )"));
+    try testing.expectError(error.Syntax, gtroff.expr.eval("1 + 2"));
+}

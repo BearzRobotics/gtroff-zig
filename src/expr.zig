@@ -34,12 +34,23 @@ const Parser = struct {
 
     /// A number or parenthesised expression with its leading `+`, `-` and `!`.
     /// The signs are counted in a loop so that a long run cannot use up the stack.
+    /// Blanks are allowed inside parentheses only; outside, one ends the
+    /// expression.
+    fn skipBlanks(self: *Parser) void {
+        if (self.depth == 0) return;
+        while (self.peek()) |c| : (self.i += 1) {
+            if (c != ' ' and c != '\t') break;
+        }
+    }
+
     fn unary(self: *Parser) Error!f64 {
+        self.skipBlanks();
         const start = self.i;
         while (self.peek()) |c| : (self.i += 1) {
             if (c != '+' and c != '-' and c != '!') break;
         }
         const signs = self.s[start..self.i];
+        self.skipBlanks();
         var v = try self.primary();
         var k = signs.len;
         while (k > 0) {
@@ -65,7 +76,9 @@ const Parser = struct {
 
     fn expr(self: *Parser) Error!f64 {
         var v = try self.unary();
-        while (self.peek()) |c| {
+        while (true) {
+            self.skipBlanks();
+            const c = self.peek() orelse break;
             const two: ?u8 = if (self.i + 1 < self.s.len) self.s[self.i + 1] else null;
             var width: usize = 1;
             const op: u8 = switch (c) {
