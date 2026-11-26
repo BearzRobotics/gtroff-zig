@@ -495,7 +495,11 @@ const Parser = struct {
     fn request(self: *Parser, l: []const u8) Allocator.Error!void {
         const body = stripComment(std.mem.trimStart(u8, l, " \t"));
         if (body.len == 0) return;
-        const name_end = std.mem.indexOfAny(u8, body, " \t") orelse body.len;
+        var name_end = std.mem.indexOfAny(u8, body, " \t") orelse body.len;
+        // `.el\\{` and `.ie\\n(...` need no blank after the name.
+        for ([_][]const u8{ "if\\", "ie\\", "el\\" }) |start| {
+            if (std.mem.startsWith(u8, body, start)) name_end = 2;
+        }
         const name = body[0..name_end];
         const rest = std.mem.trimStart(u8, body[name_end..], " \t");
 

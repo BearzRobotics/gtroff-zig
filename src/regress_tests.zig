@@ -203,3 +203,8 @@ test "BUG-036: control characters and bad UTF-8 do not reach the tree" {
 test "BUG-016: a nested .ie/.el leaves the outer one alone" {
     try expect(.man, ".ie n \\{\\\n.ie t inner-yes\n.el inner-no\n.\\}\n.el OUTER-ELSE\n", "inner-no\n");
 }
+
+test "BUG-017: .el needs no blank before \\{" {
+    try expect(.man, ".ie t yes\n.el\\{\\\nfirst\nsecond\n.\\}\n", "first second\n");
+    try expect(.man, ".ie n yes\n.el\\{\\\nfirst\nsecond\n.\\}\n", "yes\n");
+}
