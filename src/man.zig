@@ -331,6 +331,17 @@ const Parser = struct {
         self.continued = r.continued;
     }
 
+    /// Appends `s` (with escapes), starting in `font`.
+    fn addStyled(self: *Parser, parent: *Node, s: []const u8, font: Font) Allocator.Error!void {
+        const saved_font = self.st.font;
+        const saved_prev = self.st.prev;
+        self.st.font = font;
+        self.st.prev = font;
+        try self.addText(parent, s, false);
+        self.st.font = saved_font;
+        self.st.prev = saved_prev;
+    }
+
     /// A link address with its escapes (`\\-`, `\\:`, `\\%`) read.
     fn address(self: *Parser, s: []const u8) Allocator.Error![]const u8 {
         const font = self.st.font;
@@ -623,15 +634,15 @@ const Parser = struct {
             .SY => {
                 self.endPara();
                 const target = try self.sink();
-                if (args.len > 0) try self.addRun(target, args[0], Font.b);
+                if (args.len > 0) try self.addStyled(target, args[0], Font.b);
             },
             .OP => {
                 const target = try self.sink();
                 try self.addRun(target, " [", .roman);
-                if (args.len > 0) try self.addRun(target, args[0], Font.b);
+                if (args.len > 0) try self.addStyled(target, args[0], Font.b);
                 if (args.len > 1) {
                     try self.addRun(target, " ", .roman);
-                    try self.addRun(target, args[1], Font.i);
+                    try self.addStyled(target, args[1], Font.i);
                 }
                 try self.addRun(target, "]", .roman);
             },

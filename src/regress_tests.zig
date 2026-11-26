@@ -223,3 +223,7 @@ test "BUG-020: escapes in link addresses are read" {
     try expect(.man, ".UR https://\\:example.com/a\\-b\nsite\n.UE\n", "site <https://example.com/a-b>\n");
     try expect(.man, ".MT bug\\-x@gnu.org\n.ME\n", "mailto:bug-x@gnu.org\n");
 }
+
+test "BUG-021: .SY and .OP read the escapes in their arguments" {
+    try expect(.man, ".SY cmd\\-x\n.OP \\-a \\fIfile\\fR\n.YS\n", "**cmd-x** [**-a** _file_]\n");
+}
