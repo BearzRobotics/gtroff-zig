@@ -19,6 +19,8 @@ const Font = escape.Font;
 /// Deepest `.RS` nesting followed; more is ignored.
 const max_levels = 16;
 
+/// Deepest nesting of `.ie` blocks waiting for their `.el`.
+const max_ie_depth = 32;
 /// Deepest chain of conditionals on one line (`.if n .if n ...`).
 const max_cond_depth = 32;
 
@@ -144,7 +146,9 @@ const Parser = struct {
     padded_cells: usize = 0,
     expanded_bytes: usize = 0,
     skip_depth: usize = 0,
-    last_cond: bool = false,
+    /// Results of the `.ie` requests that still wait for their `.el`.
+    ie_results: [max_ie_depth]bool = undefined,
+    ie_count: usize = 0,
     cond_depth: usize = 0,
     /// Indent (columns) used by `.TP`, `.IP` and `.RS` when they give none.
     indent: u16 = 7,
@@ -693,7 +697,15 @@ const Parser = struct {
         }
         const r = try self.evalCond(s);
         const truth = r.truth != negate;
-        if (is_ie) self.last_cond = truth;
+        if (is_ie) {
+            // Full: forget the oldest.
+            if (self.ie_count == max_ie_depth) {
+                std.mem.copyForwards(bool, self.ie_results[0 .. max_ie_depth - 1], self.ie_results[1..]);
+                self.ie_count -= 1;
+            }
+            self.ie_results[self.ie_count] = truth;
+            self.ie_count += 1;
+        }
         try self.branch(truth, std.mem.trimStart(u8, r.rest, " \t"));
     }
 
@@ -708,7 +720,13 @@ const Parser = struct {
     }
 
     fn elseBranch(self: *Parser, rest: []const u8) Allocator.Error!void {
-        try self.branch(!self.last_cond, rest);
+        // An `.el` with no `.ie` runs its body.
+        var matched = false;
+        if (self.ie_count > 0) {
+            self.ie_count -= 1;
+            matched = self.ie_results[self.ie_count];
+        }
+        try self.branch(!matched, rest);
     }
 
     /// Runs the body of a conditional if `truth`; skips a `\{ ... \}` block otherwise.
