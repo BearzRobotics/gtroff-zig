@@ -50,7 +50,11 @@ pub const max_expanded_bytes = 4 << 20;
 pub fn endsDefinition(l: []const u8, end: []const u8) bool {
     if (l.len == 0 or l[0] != '.') return false;
     const after = std.mem.trimStart(u8, l[1..], " \t");
-    return std.mem.startsWith(u8, after, end[1..]);
+    const name = end[1..];
+    if (!std.mem.startsWith(u8, after, name)) return false;
+    // The whole name: `.Zfoo` does not end a definition that waits for `.Z`.
+    const tail = after[name.len..];
+    return tail.len == 0 or tail[0] == ' ' or tail[0] == '\t' or tail[0] == '\\' or std.mem.eql(u8, end, "..");
 }
 
 /// Copy mode: `\\` becomes `\`, so a body written as `\\$1` ends up as `\$1`.

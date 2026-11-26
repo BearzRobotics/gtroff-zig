@@ -337,3 +337,7 @@ test "BUG-039: a .ds value is the rest of the line" {
 test "BUG-040: \\$@ keeps the arguments apart" {
     try expect(.man, ".de X\n.BR \\\\$@\n..\n.X \"a b\" c\n", "**a b**c\n");
 }
+
+test "BUG-041: a custom end marker must be the whole name" {
+    try expect(.man, ".de X Z\nhidden\n.Zfoo\nstill hidden\n.Z\nshown\n", "shown\n");
+}
