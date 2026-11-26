@@ -76,3 +76,11 @@ test "BUG-005: a written table reads back with its columns" {
 test "BUG-006: macros that fan out stop after a bounded amount of work" {
     try expect(.man, ".de A\n" ++ ".A\n.A\n.A\n.A\n.A\n.A\n.A\n.A\n" ++ "..\n.A\ndone\n", "done\n");
 }
+
+test "BUG-007: macro arguments that double at each level stop at a byte limit" {
+    try expect(.man, ".de A\n.A \"" ++ "\\\\$1" ++ "\\\\$1\\\\$1\\\\$1\\\\$1\\\\$1\\\\$1\\\\$1" ++ "\"\n..\n.A xxxxxxxx\ndone\n", "done\n");
+}
+
+test "BUG-007: a macro may append to itself while it runs" {
+    try expect(.man, ".de A\none\n.am A\ntwo\n..\n..\n.am A\n..\n.A\n", "one\n");
+}

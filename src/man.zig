@@ -31,6 +31,8 @@ const max_macro_depth = 16;
 /// Most lines all macro calls of one page may run. The depth limit alone does
 /// not bound the work: a macro that calls itself eight times makes 8^16 calls.
 const max_expanded_lines = 100_000;
+/// Most bytes those lines may have after their arguments are filled in.
+const max_expanded_bytes = 4 << 20;
 
 /// True when `l` ends a macro definition or `.ig` block. The end is `..` or
 /// `.NAME`, and blanks are allowed after the first dot (Asciidoctor writes `.  .`).
@@ -53,12 +55,15 @@ fn copyMode(a: Allocator, l: []const u8) Allocator.Error![]const u8 {
 }
 
 /// Replaces `\$1` ... `\$9`, `\$*` and `\$#` by the macro's arguments.
-fn substArgs(a: Allocator, l: []const u8, args: []const []const u8) Allocator.Error![]const u8 {
+/// Null when the result would be longer than `limit`.
+fn substArgs(a: Allocator, l: []const u8, args: []const []const u8, limit: usize) Allocator.Error!?[]const u8 {
+    if (l.len > limit) return null;
     if (std.mem.indexOf(u8, l, "\\$") == null) return l;
     var out: std.ArrayList(u8) = .empty;
     var i: usize = 0;
     while (i < l.len) : (i += 1) {
-        if (l[i] == '\\' and i + 2 < l.len + 0 and l[i + 1] == '$') {
+        if (out.items.len > limit) return null;
+        if (l[i] == '\\' and i + 2 < l.len and l[i + 1] == '$') {
             const c = l[i + 2];
             if (c >= '1' and c <= '9') {
                 const n = c - '1';
@@ -68,6 +73,7 @@ fn substArgs(a: Allocator, l: []const u8, args: []const []const u8) Allocator.Er
             }
             if (c == '*' or c == '@') {
                 for (args, 0..) |arg, k| {
+                    if (out.items.len > limit) return null;
                     if (k > 0) try out.append(a, ' ');
                     try out.appendSlice(a, arg);
                 }
@@ -82,8 +88,15 @@ fn substArgs(a: Allocator, l: []const u8, args: []const []const u8) Allocator.Er
         }
         try out.append(a, l[i]);
     }
+    if (out.items.len > limit) return null;
     return out.items;
 }
+
+/// The body of a user macro: one run of lines from its `.de` and one more from
+/// each `.am`, so appending does not copy what is already there.
+const Macro = struct {
+    chunks: std.ArrayList([]const []const u8) = .empty,
+};
 
 const Parser = struct {
     a: Allocator,
@@ -114,11 +127,12 @@ const Parser = struct {
     /// While skipping an `.ig` block: the line that ends it.
     skip_end: ?[]const u8 = null,
     /// User-defined macros (`.de`): name to body lines, in copy mode.
-    macros: std.StringHashMapUnmanaged([]const []const u8) = .empty,
+    macros: std.StringHashMapUnmanaged(*Macro) = .empty,
     /// The macro being defined, until its end line.
     def: ?Definition = null,
     macro_depth: usize = 0,
     expanded_lines: usize = 0,
+    expanded_bytes: usize = 0,
     skip_depth: usize = 0,
     last_cond: bool = false,
     /// Indent (columns) used by `.TP`, `.IP` and `.RS` when they give none.
@@ -729,9 +743,11 @@ const Parser = struct {
         if (self.def) |*d| {
             if (endsDefinition(l, d.end)) {
                 const gop = try self.macros.getOrPut(self.a, d.name);
-                if (d.append and gop.found_existing) {
-                    gop.value_ptr.* = try std.mem.concat(self.a, []const u8, &.{ gop.value_ptr.*, d.lines.items });
-                } else gop.value_ptr.* = d.lines.items;
+                if (!d.append or !gop.found_existing) {
+                    gop.value_ptr.* = try self.a.create(Macro);
+                    gop.value_ptr.*.* = .{};
+                }
+                if (d.lines.items.len > 0) try gop.value_ptr.*.chunks.append(self.a, d.lines.items);
                 self.def = null;
             } else try d.lines.append(self.a, try copyMode(self.a, l));
             return;
@@ -776,17 +792,27 @@ const Parser = struct {
 
     /// Runs a user macro: its body lines with the arguments filled in.
     fn callMacro(self: *Parser, name: []const u8, args: []const []const u8) Allocator.Error!void {
-        const body = self.macros.get(name) orelse return;
+        const macro = self.macros.get(name) orelse return;
         if (self.macro_depth >= max_macro_depth) return;
         self.macro_depth += 1;
         defer self.macro_depth -= 1;
         const saved_args = self.st.regs.get(".$") orelse 0;
         try self.st.regs.put(self.a, ".$", @intCast(args.len));
         defer self.st.regs.put(self.a, ".$", saved_args) catch {};
-        for (body) |bl| {
-            if (self.expanded_lines >= max_expanded_lines) break;
-            self.expanded_lines += 1;
-            try self.line(try substArgs(self.a, bl, args));
+        // By index: the body may append to itself while it runs, which can
+        // move the list of chunks but not the lines of a chunk.
+        const chunks = macro.chunks.items.len;
+        for (0..chunks) |c| {
+            for (macro.chunks.items[c]) |bl| {
+                if (self.expanded_lines >= max_expanded_lines) return;
+                self.expanded_lines += 1;
+                const filled = try substArgs(self.a, bl, args, max_expanded_bytes - self.expanded_bytes) orelse {
+                    self.expanded_lines = max_expanded_lines;
+                    return;
+                };
+                self.expanded_bytes += filled.len;
+                try self.line(filled);
+            }
         }
     }
 
