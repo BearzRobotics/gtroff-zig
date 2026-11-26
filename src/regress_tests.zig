@@ -218,3 +218,8 @@ test "BUG-019: common escapes do not print their letters or arguments" {
     try expect(.man, "A\\m(rdB \\F[CW]C \\s[12]D \\s'12'E \\kxG \\)H\\{\\}\n", "AB C D E G H\n");
     try expect(.man, "\\z\\(emF\n", "\u{2014}F\n");
 }
+
+test "BUG-020: escapes in link addresses are read" {
+    try expect(.man, ".UR https://\\:example.com/a\\-b\nsite\n.UE\n", "site <https://example.com/a-b>\n");
+    try expect(.man, ".MT bug\\-x@gnu.org\n.ME\n", "mailto:bug-x@gnu.org\n");
+}

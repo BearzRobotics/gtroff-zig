@@ -331,6 +331,17 @@ const Parser = struct {
         self.continued = r.continued;
     }
 
+    /// A link address with its escapes (`\\-`, `\\:`, `\\%`) read.
+    fn address(self: *Parser, s: []const u8) Allocator.Error![]const u8 {
+        const font = self.st.font;
+        const prev = self.st.prev;
+        defer {
+            self.st.font = font;
+            self.st.prev = prev;
+        }
+        return escape.plain(self.a, &self.st, s);
+    }
+
     fn addRun(self: *Parser, parent: *Node, text: []const u8, font: Font) Allocator.Error!void {
         var inner = try self.node(if (font.mono) .code else .text);
         inner.literal = try self.a.dupe(u8, text);
@@ -595,8 +606,8 @@ const Parser = struct {
                 const target = try self.sink();
                 try self.lineSep(target);
                 const lnk = try self.node(.link);
-                const dest = if (args.len > 0) args[0] else "";
-                lnk.literal = if (req == .MT) try std.fmt.allocPrint(self.a, "mailto:{s}", .{dest}) else try self.a.dupe(u8, dest);
+                const dest = try self.address(if (args.len > 0) args[0] else "");
+                lnk.literal = if (req == .MT) try std.fmt.allocPrint(self.a, "mailto:{s}", .{dest}) else dest;
                 target.appendChild(lnk);
                 self.link = lnk;
             },
