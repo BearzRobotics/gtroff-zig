@@ -1024,6 +1024,7 @@ const Parser = struct {
         self.line_no += 1;
         var l = raw;
         if (l.len > 0 and l[l.len - 1] == '\r') l = l[0 .. l.len - 1];
+        l = try escape.sanitize(self.a, l);
         const is_macro = l.len > 1 and (l[0] == '.' or l[0] == '\'') and l[1] != '\\' and !std.ascii.isWhitespace(l[1]);
         if (man.commentBody(l)) |t| {
             // A comment inside a paragraph or literal block is dropped.

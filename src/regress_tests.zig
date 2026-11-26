@@ -183,3 +183,19 @@ test "BUG-035: footnote labels and comment lines are made safe" {
     try testing.expect(std.mem.find(u8, out, "[\\eso]") != null);
     try testing.expect(std.mem.find(u8, out, "[\\so]") == null);
 }
+
+test "BUG-036: control characters and bad UTF-8 do not reach the tree" {
+    const src = "raw\x1b]0;p\x07 \\[u001b][31m \\[u0000]z caf\xe9\n.UR a\x00b\ny\n.UE\n";
+    for ([_]Format{ .man, .mdoc }) |format| {
+        var doc = try switch (format) {
+            .man => gtroff.parseMan(testing.allocator, src),
+            .mdoc => gtroff.parseMdoc(testing.allocator, src),
+        };
+        defer doc.deinit();
+        var walker = md.Walker.init(doc.root);
+        while (walker.next()) |ev| {
+            try testing.expect(std.unicode.utf8ValidateSlice(ev.node.literal));
+            for (ev.node.literal) |c| try testing.expect(c >= 32 or c == '\t' or c == '\n');
+        }
+    }
+}

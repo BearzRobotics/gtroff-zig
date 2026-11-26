@@ -149,10 +149,42 @@ fn readName(s: []const u8) ?struct { name: []const u8, used: usize } {
     return .{ .name = s[0..1], .used = 1 };
 }
 
+fn isControl(cp: u21) bool {
+    return (cp < 0x20 and cp != '\t') or (cp >= 0x7f and cp <= 0x9f);
+}
+
+/// An input line with control characters other than tab, and bytes that are not
+/// UTF-8, replaced by U+FFFD, so that a page cannot put terminal escape
+/// sequences or NULs into the tree.
+pub fn sanitize(a: Allocator, l: []const u8) Allocator.Error![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var done: usize = 0;
+    var i: usize = 0;
+    while (i < l.len) {
+        var len: usize = std.unicode.utf8ByteSequenceLength(l[i]) catch 1;
+        var bad = true;
+        if (i + len <= l.len) {
+            if (std.unicode.utf8Decode(l[i..][0..len])) |cp| {
+                bad = isControl(cp);
+            } else |_| len = 1;
+        } else len = 1;
+        if (bad) {
+            try out.appendSlice(a, l[done..i]);
+            try out.appendSlice(a, "\u{fffd}");
+            done = i + len;
+        }
+        i += len;
+    }
+    if (done == 0) return l;
+    try out.appendSlice(a, l[done..]);
+    return out.items;
+}
+
 /// Encodes `\[uXXXX]` style names; returns null if `name` is not one.
 fn unicodeName(name: []const u8, buf: *[4]u8) ?[]const u8 {
     if (name.len < 5 or name[0] != 'u') return null;
     const cp = std.fmt.parseInt(u21, name[1..], 16) catch return null;
+    if (isControl(cp)) return null;
     const n = std.unicode.utf8Encode(cp, buf) catch return null;
     return buf[0..n];
 }

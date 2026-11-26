@@ -758,6 +758,7 @@ const Parser = struct {
         self.line_no += 1;
         var l = raw;
         if (l.len > 0 and l[l.len - 1] == '\r') l = l[0 .. l.len - 1];
+        l = try escape.sanitize(self.a, l);
 
         if (self.def) |*d| {
             if (endsDefinition(l, d.end)) {
