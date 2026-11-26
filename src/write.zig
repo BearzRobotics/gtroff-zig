@@ -85,6 +85,8 @@ const Gen = struct {
     opts: Options,
     out: std.ArrayList(u8) = .empty,
     depth: u32 = 0,
+    /// Writing a definition term that cannot hold a `.UR` link.
+    flat_links: bool = false,
     /// The output is at the start of a line.
     bol: bool = true,
 
@@ -313,7 +315,12 @@ const Gen = struct {
         while (child) |c| : (child = c.next) {
             if (c.kind == .deflist_term) {
                 try self.req(if (prev_term) ".TQ" else ".TP");
+                // A term is one input line, so only a link that is the whole
+                // term can use `.UR`; others are written as text and address.
+                const only_link = c.first_child != null and c.first_child == c.last_child and c.first_child.?.kind == .link;
+                self.flat_links = !only_link;
                 try self.inlines(c, .{}, false);
+                self.flat_links = false;
                 try self.nl();
                 prev_term = true;
             } else {
@@ -460,7 +467,14 @@ const Gen = struct {
                         try self.comment(c.literal);
                     }
                 },
-                .link => skip_prefix = try self.link(c, font),
+                .link => if (self.flat_links) {
+                    try self.inlines(c, font, false);
+                    try self.raw(" <");
+                    try self.text(c.literal, false);
+                    try self.raw(">");
+                } else {
+                    skip_prefix = try self.link(c, font);
+                },
                 .image => try self.inlines(c, font, false),
                 .footnote_ref => {
                     try self.raw("[");

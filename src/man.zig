@@ -215,9 +215,10 @@ pub const Parser = struct {
 
     /// Where inline content goes now.
     fn sink(self: *Parser) Allocator.Error!*Node {
+        // An open link first: it may be inside the heading or term.
+        if (self.link) |l| return l;
         if (self.pending_heading) |h| return h;
         if (self.pending_term) |t| return t;
-        if (self.link) |l| return l;
         if (self.para) |p| return p;
         try self.flushCode();
         const p = try self.node(.paragraph);
@@ -228,6 +229,8 @@ pub const Parser = struct {
 
     /// After the text for a pending heading or term: go on with normal flow.
     fn contentDone(self: *Parser) void {
+        // An open link or a `\\c` means the heading or term goes on.
+        if (self.link != null or self.continued) return;
         if (self.pending_heading != null) self.pending_heading = null;
         if (self.pending_term != null) self.pending_term = null;
     }
@@ -287,6 +290,7 @@ pub const Parser = struct {
         };
         try self.flushCode();
         self.endPara();
+        self.link = null;
         self.open_list = null;
         const dl = self.open_dl orelse blk: {
             const d = try self.node(.deflist);
@@ -685,7 +689,13 @@ pub const Parser = struct {
                     if (lnk.first_child == null) try self.addRun(lnk, lnk.literal, .roman);
                     self.link = null;
                     // Trailing punctuation is the first argument.
+                    const was_term = self.pending_term != null or self.pending_heading != null;
                     if (args.len > 0) try self.addText(try self.sink(), args[0], false);
+                    // The link was the whole heading or term, or ended it.
+                    if (was_term) {
+                        self.continued = false;
+                        self.contentDone();
+                    }
                 }
             },
             .SY => {

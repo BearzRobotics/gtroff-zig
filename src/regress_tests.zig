@@ -358,3 +358,21 @@ test "BUG-043: .SH and .PP reset the tagged paragraph indent" {
     };
     try testing.expectEqualSlices(u16, &.{ 20, 7, 12, 7 }, got[0..n]);
 }
+
+test "BUG-044: a link can be a tagged paragraph's term" {
+    var doc = try gtroff.parseMan(testing.allocator, ".TP\n.UR http://x.example\nterm-text\n.UE\ndefinition\n");
+    defer doc.deinit();
+    const html = try doc.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(html);
+    try testing.expectEqualStrings("<dl>\n<dt><a href=\"http://x.example\">term-text</a></dt>\n<dd>\n<p>definition</p>\n</dd>\n</dl>\n", html);
+    for ([_][]const u8{ "see [here](http://x.example) now\n: def\n", "[here](http://x.example)\n: def\n" }) |src| {
+        const out = try writeFrom(markdown(src), .{});
+        defer testing.allocator.free(out);
+        var back = try gtroff.parseMan(testing.allocator, out);
+        defer back.deinit();
+        const h = try back.toHtmlAlloc(testing.allocator);
+        defer testing.allocator.free(h);
+        try testing.expect(std.mem.find(u8, h, "http://x.example") != null);
+        try testing.expect(std.mem.find(u8, h, "<p>def</p>") != null);
+    }
+}
