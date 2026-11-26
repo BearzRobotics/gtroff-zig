@@ -251,3 +251,7 @@ test "BUG-024: a table without .TE does not drop the rest of the page" {
     defer testing.allocator.free(eof);
     try testing.expect(std.mem.find(u8, eof, "last-row") != null);
 }
+
+test "BUG-025: mdoc end of line comments are not printed" {
+    try expect(.mdoc, ".Fl a \\\" SECRET COMMENT\ntext \\\" HIDDEN WORDS\n", "**-a** text\n");
+}

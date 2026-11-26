@@ -1143,7 +1143,7 @@ pub fn htmlComment(a: Allocator, text: []const u8) Allocator.Error![]const u8 {
 }
 
 /// The line without a trailing `\"` comment (`\\` pairs are skipped).
-fn stripComment(l: []const u8) []const u8 {
+pub fn stripComment(l: []const u8) []const u8 {
     var i: usize = 0;
     while (i + 1 < l.len) : (i += 1) {
         if (l[i] != '\\') continue;

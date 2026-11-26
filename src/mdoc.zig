@@ -1036,6 +1036,11 @@ const Parser = struct {
             return;
         }
 
+        const had_text = l.len > 0;
+        l = man.stripComment(l);
+        // Nothing but a comment is not a blank line.
+        if (had_text and l.len == 0) return;
+
         var words: []const Word = &.{};
         if (is_macro) words = try splitWords(self.a, l[1..]);
 
