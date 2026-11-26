@@ -1026,7 +1026,7 @@ const Parser = struct {
         var l = raw;
         if (l.len > 0 and l[l.len - 1] == '\r') l = l[0 .. l.len - 1];
         l = try escape.sanitize(self.a, l);
-        const is_macro = l.len > 1 and (l[0] == '.' or l[0] == '\'') and l[1] != '\\' and !std.ascii.isWhitespace(l[1]);
+        const is_macro = l.len > 0 and (l[0] == '.' or l[0] == '\'');
         if (man.commentBody(l)) |t| {
             // A comment inside a paragraph or literal block is dropped.
             if (self.keep_comments and self.para == null and !self.bd_literal and self.xo == null) {
@@ -1043,7 +1043,12 @@ const Parser = struct {
         if (had_text and l.len == 0) return;
 
         var words: []const Word = &.{};
-        if (is_macro) words = try splitWords(self.a, l[1..]);
+        if (is_macro) {
+            const body = std.mem.trimStart(u8, l[1..], " \t");
+            // An empty request, or one such as `.\\}` that only closes a block.
+            if (body.len == 0 or body[0] == '\\') return;
+            words = try splitWords(self.a, body);
+        }
 
         // `.Xo` ... `.Xc` joins several lines into one macro line.
         if (self.xo != null) {

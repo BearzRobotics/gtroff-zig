@@ -260,3 +260,7 @@ test "BUG-026: mdoc text lines keep fonts and non-breaking blanks" {
     try expect(.mdoc, "\\fBbold words\\fR and a\\ b\n", "**bold words** and a\u{a0}b\n");
     try expect(.mdoc, ".No a\\ b\n", "a\u{a0}b\n");
 }
+
+test "BUG-027: lone dots and blanks after the dot are control lines" {
+    try expect(.mdoc, "one\n.\ntwo\n.\\}\n. Pp\nthree\n", "one two\n\nthree\n");
+}
