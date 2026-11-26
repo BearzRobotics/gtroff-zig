@@ -126,11 +126,10 @@ const Gen = struct {
         // A level-1 heading `name(section)` is the page title.
         if (start) |f| if (f.kind == .heading and f.level == 1) {
             const t = try self.plain(f);
-            if (std.mem.lastIndexOfScalar(u8, t, '(')) |lp| {
-                if (t.len > lp + 2 and t[t.len - 1] == ')') {
-                    title = t[0..lp];
-                    section = t[lp + 1 .. t.len - 1];
-                }
+            const paren = std.mem.lastIndexOfScalar(u8, t, '(');
+            if (paren != null and t.len > paren.? + 2 and t[t.len - 1] == ')') {
+                title = t[0..paren.?];
+                section = t[paren.? + 1 .. t.len - 1];
             } else if (t.len != 0) title = t;
             start = f.next;
         };

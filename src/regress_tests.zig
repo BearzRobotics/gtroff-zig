@@ -308,3 +308,9 @@ test "BUG-032: column list cells stay in their rows" {
 test "BUG-066: a text line inside .Xo is not an argument of the macro before it" {
     try expect(.mdoc, ".Xo\n.Fl a\nkept words\n.Xc\n", "**-a** kept words\n");
 }
+
+test "BUG-033: a first heading with parentheses is not lost" {
+    const out = try writeFrom(markdown("# Using foo() safely\n\nbody\n"), .{});
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.startsWith(u8, out, ".TH \"Using foo() safely\" \"7\"\n"));
+}
