@@ -160,6 +160,8 @@ const Gen = struct {
                 '"' => try buf.appendSlice(self.a, "\"\""),
                 '\\' => try buf.appendSlice(self.a, "\\e"),
                 '-' => try buf.appendSlice(self.a, "\\-"),
+                // A newline would end the request line.
+                0...31, 127 => try buf.append(self.a, ' '),
                 else => try buf.append(self.a, c),
             }
         }
@@ -504,7 +506,7 @@ const Gen = struct {
 
     fn destArg(self: *Gen, dest: []const u8) Allocator.Error!void {
         var needs_quote = dest.len == 0;
-        for (dest) |ch| if (ch == ' ' or ch == '"' or ch == '\t') {
+        for (dest) |ch| if (ch <= ' ' or ch == '"' or ch == 127) {
             needs_quote = true;
         };
         if (needs_quote) return self.quoted(dest);

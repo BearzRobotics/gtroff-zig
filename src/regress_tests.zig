@@ -169,3 +169,9 @@ test "BUG-015: --!> does not end a kept comment" {
     defer testing.allocator.free(out);
     try testing.expectEqualStrings("<!-- x --! > <img src=x> -->\n", out);
 }
+
+test "BUG-034: options cannot break out of a macro argument" {
+    const out = try writeFrom(markdown("x\n"), .{ .date = "x\n.so /dev/null", .title = "a\r\nb" });
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.startsWith(u8, out, ".TH \"a  b\" \"7\" \"x .so /dev/null\" \"\" \"\"\n"));
+}
