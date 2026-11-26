@@ -139,14 +139,23 @@ fn builtinString(name: []const u8) ?[]const u8 {
 fn readName(s: []const u8) ?struct { name: []const u8, used: usize } {
     if (s.len == 0) return null;
     if (s[0] == '(') {
-        if (s.len < 3) return .{ .name = s[1..], .used = s.len };
-        return .{ .name = s[1..3], .used = 3 };
+        // Two characters, which need not be one byte each.
+        var end = 1 + charLen(s[1..]);
+        end += charLen(s[end..]);
+        return .{ .name = s[1..end], .used = end };
     }
     if (s[0] == '[') {
         const end = std.mem.indexOfScalar(u8, s, ']') orelse return .{ .name = s[1..], .used = s.len };
         return .{ .name = s[1..end], .used = end + 1 };
     }
-    return .{ .name = s[0..1], .used = 1 };
+    const n = charLen(s);
+    return .{ .name = s[0..n], .used = n };
+}
+
+/// Bytes of the UTF-8 character at the start of `s`; 0 when `s` is empty.
+pub fn charLen(s: []const u8) usize {
+    if (s.len == 0) return 0;
+    return @min(std.unicode.utf8ByteSequenceLength(s[0]) catch 1, s.len);
 }
 
 fn isControl(cp: u21) bool {

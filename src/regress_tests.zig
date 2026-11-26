@@ -513,3 +513,20 @@ test "BUG-070: every byte that is not UTF-8 is replaced" {
         }
     }
 }
+
+test "BUG-071: non-ASCII names and table separators are not cut in half" {
+    const cases = [_][]const u8{
+        "\\f\u{e9} x\n", "\\(a\u{e9} x\n",  "\\(\u{e9}a x\n",    "\\*\u{2014} x\n",
+        "\\n\u{e9} x\n", "\\k\u{2014} x\n", ".if \\n\u{e9} y\n", "\\$\u{e9} x\n",
+    };
+    for (cases) |src| for ([_]Format{ .man, .mdoc }) |format| {
+        const out = try render(format, src);
+        defer testing.allocator.free(out);
+        try testing.expect(std.unicode.utf8ValidateSlice(out));
+    };
+    var doc = try gtroff.parseMan(testing.allocator, ".TS\ntab(\u{e9});\nl l.\na\u{e9}b\n.TE\n");
+    defer doc.deinit();
+    const html = try doc.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(html);
+    try testing.expect(std.mem.find(u8, html, "<td>a</td>\n<td>b</td>") != null);
+}

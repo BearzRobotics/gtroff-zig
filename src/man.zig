@@ -1027,12 +1027,12 @@ pub const Parser = struct {
         self.nofill = false;
         defer self.nofill = nofill;
         var i: usize = 0;
-        var tab: u8 = '\t';
+        var tab: []const u8 = "\t";
         if (i < lines.len) {
             const t = std.mem.trim(u8, lines[i], " \t");
             if (std.mem.endsWith(u8, t, ";")) {
                 if (std.mem.find(u8, t, "tab(")) |p| if (p + 4 < t.len) {
-                    tab = t[p + 4];
+                    tab = t[p + 4 ..][0..escape.charLen(t[p + 4 ..])];
                 };
                 i += 1;
             }
@@ -1101,7 +1101,7 @@ pub const Parser = struct {
                 };
                 row.appendChild(cell);
 
-                const tab_pos = if (col + 1 < max_columns) std.mem.indexOfScalar(u8, rest, tab) else null;
+                const tab_pos = if (col + 1 < max_columns) std.mem.find(u8, rest, tab) else null;
                 const piece = std.mem.trim(u8, if (tab_pos) |p| rest[0..p] else rest, " ");
                 if (std.mem.endsWith(u8, piece, "T{")) {
                     // A text block runs to the line that starts with `T}`.
@@ -1126,8 +1126,8 @@ pub const Parser = struct {
                     }
                     i = j;
                     const after = std.mem.trimStart(u8, lines[j], " \t")[2..];
-                    if (after.len > 0 and after[0] == tab) {
-                        rest = after[1..];
+                    if (std.mem.startsWith(u8, after, tab)) {
+                        rest = after[tab.len..];
                         continue;
                     }
                     break;
@@ -1139,7 +1139,7 @@ pub const Parser = struct {
                     self.st.prev = .roman;
                 }
                 if (tab_pos) |p| {
-                    rest = rest[p + 1 ..];
+                    rest = rest[p + tab.len ..];
                 } else break;
             }
             rows += 1;
