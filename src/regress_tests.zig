@@ -208,3 +208,7 @@ test "BUG-017: .el needs no blank before \\{" {
     try expect(.man, ".ie t yes\n.el\\{\\\nfirst\nsecond\n.\\}\n", "first second\n");
     try expect(.man, ".ie n yes\n.el\\{\\\nfirst\nsecond\n.\\}\n", "yes\n");
 }
+
+test "BUG-018: a comment ending in a backslash does not swallow the next line" {
+    try expect(.man, ".\\\" trailing \\\nnext\nkept\n", "next kept\n");
+}

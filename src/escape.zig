@@ -380,9 +380,22 @@ pub fn nextLogicalLine(a: Allocator, lines: *std.mem.SplitIterator(u8, .scalar))
 }
 
 fn endsWithContinuation(line: []const u8) bool {
+    // A backslash inside a comment does not join the next line to it.
+    if (hasComment(line)) return false;
     var n: usize = 0;
     while (n < line.len and line[line.len - 1 - n] == '\\') n += 1;
     return n % 2 == 1;
+}
+
+/// True when `line` holds a `\\"` comment.
+fn hasComment(line: []const u8) bool {
+    var i: usize = 0;
+    while (i + 1 < line.len) : (i += 1) {
+        if (line[i] != '\\') continue;
+        if (line[i + 1] == '"') return true;
+        i += 1; // the escaped character, which may be a backslash
+    }
+    return false;
 }
 
 /// `s` with the number registers and strings it names replaced (`\\n[x]`,
