@@ -608,6 +608,8 @@ pub const Parser = struct {
                     // .B .I .SM .SB separate their arguments with spaces; the
                     // alternating macros (.BR, .BI, ...) do not.
                     const spaced = req == .B or req == .I or req == .SM or req == .SB;
+                    // With nothing to print, the next line is the text.
+                    if (args.len == 0) return;
                     for (args, 0..) |arg, k| {
                         if (k > 0 and spaced) try self.code.append(self.a, ' ');
                         try self.code.appendSlice(self.a, try escape.plain(self.a, &self.st, arg));

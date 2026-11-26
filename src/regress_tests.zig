@@ -449,3 +449,7 @@ test "BUG-056: closers past the nesting limit stay balanced" {
     defer testing.allocator.free(out);
     try testing.expect(std.mem.endsWith(u8, out, "\noutside\n"));
 }
+
+test "BUG-057: a bare font macro adds no line in a no-fill block" {
+    try expect(.man, ".nf\n.B\nbold line\n.fi\n", "bold line\n");
+}
