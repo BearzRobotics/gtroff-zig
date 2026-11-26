@@ -227,3 +227,7 @@ test "BUG-020: escapes in link addresses are read" {
 test "BUG-021: .SY and .OP read the escapes in their arguments" {
     try expect(.man, ".SY cmd\\-x\n.OP \\-a \\fIfile\\fR\n.YS\n", "**cmd-x** [**-a** _file_]\n");
 }
+
+test "BUG-022: control lines with blanks or an apostrophe work in no-fill blocks" {
+    try expect(.man, ".nf\na\n'br\n.  fi\nfilled one\nfilled two\n", "a\n\nfilled one filled two\n");
+}

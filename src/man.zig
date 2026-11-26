@@ -833,10 +833,8 @@ const Parser = struct {
             if (commentBody(l)) |t| return self.addComment(t);
         }
         if (self.in_tbl) return self.tblLine(l);
-        if (l.len > 0 and (l[0] == '.' or l[0] == '\'')) {
-            const is_end = std.mem.startsWith(u8, l[1..], "fi") or std.mem.startsWith(u8, l[1..], "EE");
-            if (!self.nofill or is_end or isRequestInNofill(l)) return self.request(l[1..]);
-        }
+        // Control lines are requests in no-fill blocks too.
+        if (l.len > 0 and (l[0] == '.' or l[0] == '\'')) return self.request(l[1..]);
         if (self.nofill) {
             try self.code.appendSlice(self.a, try escape.plain(self.a, &self.st, l));
             try self.code.append(self.a, '\n');
@@ -878,11 +876,6 @@ const Parser = struct {
                 try self.line(filled);
             }
         }
-    }
-
-    fn isRequestInNofill(l: []const u8) bool {
-        // Control lines stay requests inside .nf blocks (comments, fonts, .fi ...).
-        return l.len > 1 and l[0] == '.' and !std.ascii.isWhitespace(l[1]);
     }
 
     /// Lines between `.TS` and `.TE` are collected; `.TE` builds the table.
