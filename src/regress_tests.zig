@@ -155,3 +155,9 @@ test "BUG-012: text cannot start a request line" {
     try testing.expect(std.mem.find(u8, out, "hello .so /etc/hostname\n") != null);
     try testing.expect(std.mem.findScalar(u8, out, '\r') == null);
 }
+
+test "BUG-013: table cells are always data" {
+    const out = try writeFrom(markdown("| h |\n|---|\n| .so /etc/hostname |\n| _ |\n| T{ |\n| \\.TE |\n\nafter\n"), .{});
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "h\n\\&.so /etc/hostname\n\\&_\nT{\\&\n\\&.TE\n.TE\n") != null);
+}

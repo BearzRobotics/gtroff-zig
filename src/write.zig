@@ -345,10 +345,13 @@ const Gen = struct {
         while (row) |r| : (row = r.next) {
             try self.nl();
             var cell = r.first_child;
+            const row_start = self.out.items.len;
             while (cell) |cl| : (cell = cl.next) {
                 if (cl.prev != null) try self.raw("\t");
                 try self.raw(try self.plainEsc(cl));
             }
+            // A blank line would not be read as a row.
+            if (self.out.items.len == row_start) try self.raw("\\&");
             try self.raw("\n");
         }
         try self.req(".TE");
@@ -402,15 +405,25 @@ const Gen = struct {
 
     /// `plain`, escaped for use inside a tbl cell.
     fn plainEsc(self: *Gen, n: *Node) Error![]const u8 {
-        const p = try self.plain(n);
+        return self.cellData(try self.plain(n));
+    }
+
+    /// `p` as the data of a tbl cell: nothing in it may be read as a request, a
+    /// rule, a text block or the end of a cell or row.
+    fn cellData(self: *Gen, p: []const u8) Allocator.Error![]const u8 {
         var out: std.ArrayList(u8) = .empty;
+        const rule = std.mem.eql(u8, p, "_") or std.mem.eql(u8, p, "=");
+        if (rule or (p.len > 0 and (p[0] == '.' or p[0] == '\''))) try out.appendSlice(self.a, "\\&");
         for (p) |c| {
             switch (c) {
                 '\\' => try out.appendSlice(self.a, "\\e"),
                 '-' => try out.appendSlice(self.a, "\\-"),
+                '\t', '\n', '\r' => try out.append(self.a, ' '),
+                0...8, 11, 12, 14...31, 127 => {},
                 else => try out.append(self.a, c),
             }
         }
+        if (std.mem.endsWith(u8, std.mem.trimEnd(u8, out.items, " "), "T{")) try out.appendSlice(self.a, "\\&");
         return out.items;
     }
 
