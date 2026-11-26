@@ -20,9 +20,9 @@ const Font = escape.Font;
 const max_levels = 16;
 
 /// Deepest nesting of `.ie` blocks waiting for their `.el`.
-const max_ie_depth = 32;
+pub const max_ie_depth = 32;
 /// Deepest chain of conditionals on one line (`.if n .if n ...`).
-const max_cond_depth = 32;
+pub const max_cond_depth = 32;
 
 /// Most cells in a table row; further ones are joined into the last.
 pub const max_columns = 64;
@@ -30,7 +30,7 @@ pub const max_columns = 64;
 /// widest. Without a limit the tree grows as rows times columns.
 pub const max_padded_cells = 1 << 16;
 
-const Definition = struct {
+pub const Definition = struct {
     name: []const u8,
     append: bool,
     end: []const u8,
@@ -38,23 +38,23 @@ const Definition = struct {
 };
 
 /// Deepest nesting of user macro calls followed.
-const max_macro_depth = 16;
+pub const max_macro_depth = 16;
 /// Most lines all macro calls of one page may run. The depth limit alone does
 /// not bound the work: a macro that calls itself eight times makes 8^16 calls.
-const max_expanded_lines = 100_000;
+pub const max_expanded_lines = 100_000;
 /// Most bytes those lines may have after their arguments are filled in.
-const max_expanded_bytes = 4 << 20;
+pub const max_expanded_bytes = 4 << 20;
 
 /// True when `l` ends a macro definition or `.ig` block. The end is `..` or
 /// `.NAME`, and blanks are allowed after the first dot (Asciidoctor writes `.  .`).
-fn endsDefinition(l: []const u8, end: []const u8) bool {
+pub fn endsDefinition(l: []const u8, end: []const u8) bool {
     if (l.len == 0 or l[0] != '.') return false;
     const after = std.mem.trimStart(u8, l[1..], " \t");
     return std.mem.startsWith(u8, after, end[1..]);
 }
 
 /// Copy mode: `\\` becomes `\`, so a body written as `\\$1` ends up as `\$1`.
-fn copyMode(a: Allocator, l: []const u8) Allocator.Error![]const u8 {
+pub fn copyMode(a: Allocator, l: []const u8) Allocator.Error![]const u8 {
     if (std.mem.indexOf(u8, l, "\\\\") == null) return l;
     var out: std.ArrayList(u8) = .empty;
     var i: usize = 0;
@@ -67,7 +67,7 @@ fn copyMode(a: Allocator, l: []const u8) Allocator.Error![]const u8 {
 
 /// Replaces `\$1` ... `\$9`, `\$*` and `\$#` by the macro's arguments.
 /// Null when the result would be longer than `limit`.
-fn substArgs(a: Allocator, l: []const u8, args: []const []const u8, limit: usize) Allocator.Error!?[]const u8 {
+pub fn substArgs(a: Allocator, l: []const u8, args: []const []const u8, limit: usize) Allocator.Error!?[]const u8 {
     if (l.len > limit) return null;
     if (std.mem.indexOf(u8, l, "\\$") == null) return l;
     var out: std.ArrayList(u8) = .empty;
@@ -105,11 +105,11 @@ fn substArgs(a: Allocator, l: []const u8, args: []const []const u8, limit: usize
 
 /// The body of a user macro: one run of lines from its `.de` and one more from
 /// each `.am`, so appending does not copy what is already there.
-const Macro = struct {
+pub const Macro = struct {
     chunks: std.ArrayList([]const []const u8) = .empty,
 };
 
-const Parser = struct {
+pub const Parser = struct {
     a: Allocator,
     root: *Node,
     st: escape.State = .{},
@@ -701,45 +701,6 @@ const Parser = struct {
         }
     }
 
-    const Cond = struct { truth: bool, rest: []const u8 };
-
-    /// Evaluates the condition at the start of `s` and returns what follows it:
-    /// `n o` true, `t e` false; `d name`, `r name`, `c ch`; a string comparison
-    /// `'a'b'`; or a numeric expression (true when greater than zero).
-    fn evalCond(self: *Parser, s: []const u8) Allocator.Error!Cond {
-        if (s.len == 0) return .{ .truth = false, .rest = "" };
-        const c = s[0];
-        if (std.mem.indexOfScalar(u8, "ntoe", c) != null and (s.len == 1 or !std.ascii.isAlphanumeric(s[1]))) {
-            return .{ .truth = c == 'n' or c == 'o', .rest = s[1..] };
-        }
-        if (std.mem.indexOfScalar(u8, "drc", c) != null and s.len > 1) {
-            // `d name`, `r name` (blanks optional: `rF` is register F).
-            var start: usize = 1;
-            while (start < s.len and (s[start] == ' ' or s[start] == '\t')) start += 1;
-            var end = start;
-            while (end < s.len and s[end] != ' ' and s[end] != '\t') end += 1;
-            const name = s[start..end];
-            const truth = switch (c) {
-                'd' => self.macros.contains(name) or self.st.strings.contains(name),
-                'r' => self.st.regs.contains(name),
-                else => true,
-            };
-            return .{ .truth = truth, .rest = s[end..] };
-        }
-        if (c == '\'' or c == '"') {
-            // 'string1'string2' : equal after expanding strings and registers.
-            const first = std.mem.indexOfScalarPos(u8, s, 1, c) orelse return .{ .truth = false, .rest = "" };
-            const second = std.mem.indexOfScalarPos(u8, s, first + 1, c) orelse return .{ .truth = false, .rest = "" };
-            const left = try escape.interpolate(self.a, &self.st, s[1..first]);
-            const right = try escape.interpolate(self.a, &self.st, s[first + 1 .. second]);
-            return .{ .truth = std.mem.eql(u8, left, right), .rest = s[second + 1 ..] };
-        }
-        const len = expr.tokenLen(s);
-        const text = try escape.interpolate(self.a, &self.st, s[0..len]);
-        const v = expr.eval(text) catch return .{ .truth = false, .rest = s[len..] };
-        return .{ .truth = v > 0, .rest = s[len..] };
-    }
-
     /// `.if COND body` and `.ie COND body` (see `evalCond`).
     fn conditional(self: *Parser, rest: []const u8, is_ie: bool) Allocator.Error!void {
         var s = rest;
@@ -748,7 +709,7 @@ const Parser = struct {
             negate = !negate;
             s = s[1..];
         }
-        const r = try self.evalCond(s);
+        const r = try evalCond(self, s);
         const truth = r.truth != negate;
         if (is_ie) {
             // Full: forget the oldest.
@@ -797,30 +758,6 @@ const Parser = struct {
         } else if (truth and body.len > 0) {
             try self.line(body);
         }
-    }
-
-    /// Follows the `\\{` and `\\}` on a skipped line, starting `open` blocks
-    /// deep. Returns how many are still open; 0 ends the skipping, and the rest
-    /// of that line is dropped with the block.
-    pub fn skipBraces(l: []const u8, open: usize) usize {
-        var depth = open;
-        var i: usize = 0;
-        while (i + 1 < l.len) : (i += 1) {
-            if (l[i] != '\\') continue;
-            if (l[i + 1] == '{') depth += 1;
-            if (l[i + 1] == '}') {
-                depth -= 1;
-                if (depth == 0) return 0;
-            }
-            i += 1; // the escaped character, which may be a backslash
-        }
-        return depth;
-    }
-
-    /// True when `l` has more `\\}` than `\\{`.
-    pub fn closesBlock(l: []const u8) bool {
-        // Starting deep enough that the count cannot reach zero.
-        return skipBraces(l, l.len + 1) < l.len + 1;
     }
 
     // ---- lines -------------------------------------------------------------
@@ -919,7 +856,7 @@ const Parser = struct {
         try self.tbl_lines.append(self.a, l);
     }
 
-    fn endTable(self: *Parser) Allocator.Error!void {
+    pub fn endTable(self: *Parser) Allocator.Error!void {
         if (!self.in_tbl) return;
         self.in_tbl = false;
         try self.buildTable();
@@ -1111,6 +1048,69 @@ fn countChildren(n: *const Node) usize {
     return count;
 }
 
+/// Follows the `\\{` and `\\}` on a skipped line, starting `open` blocks
+/// deep. Returns how many are still open; 0 ends the skipping, and the rest
+/// of that line is dropped with the block.
+pub fn skipBraces(l: []const u8, open: usize) usize {
+    var depth = open;
+    var i: usize = 0;
+    while (i + 1 < l.len) : (i += 1) {
+        if (l[i] != '\\') continue;
+        if (l[i + 1] == '{') depth += 1;
+        if (l[i + 1] == '}') {
+            depth -= 1;
+            if (depth == 0) return 0;
+        }
+        i += 1; // the escaped character, which may be a backslash
+    }
+    return depth;
+}
+
+/// True when `l` has more `\\}` than `\\{`.
+pub fn closesBlock(l: []const u8) bool {
+    // Starting deep enough that the count cannot reach zero.
+    return skipBraces(l, l.len + 1) < l.len + 1;
+}
+
+pub const Cond = struct { truth: bool, rest: []const u8 };
+
+/// Evaluates the condition at the start of `s` and returns what follows it:
+/// `n o` true, `t e` false; `d name`, `r name`, `c ch`; a string comparison
+/// `'a'b'`; or a numeric expression (true when greater than zero).
+pub fn evalCond(self: anytype, s: []const u8) Allocator.Error!Cond {
+    if (s.len == 0) return .{ .truth = false, .rest = "" };
+    const c = s[0];
+    if (std.mem.indexOfScalar(u8, "ntoe", c) != null and (s.len == 1 or !std.ascii.isAlphanumeric(s[1]))) {
+        return .{ .truth = c == 'n' or c == 'o', .rest = s[1..] };
+    }
+    if (std.mem.indexOfScalar(u8, "drc", c) != null and s.len > 1) {
+        // `d name`, `r name` (blanks optional: `rF` is register F).
+        var start: usize = 1;
+        while (start < s.len and (s[start] == ' ' or s[start] == '\t')) start += 1;
+        var end = start;
+        while (end < s.len and s[end] != ' ' and s[end] != '\t') end += 1;
+        const name = s[start..end];
+        const truth = switch (c) {
+            'd' => self.macros.contains(name) or self.st.strings.contains(name),
+            'r' => self.st.regs.contains(name),
+            else => true,
+        };
+        return .{ .truth = truth, .rest = s[end..] };
+    }
+    if (c == '\'' or c == '"') {
+        // 'string1'string2' : equal after expanding strings and registers.
+        const first = std.mem.indexOfScalarPos(u8, s, 1, c) orelse return .{ .truth = false, .rest = "" };
+        const second = std.mem.indexOfScalarPos(u8, s, first + 1, c) orelse return .{ .truth = false, .rest = "" };
+        const left = try escape.interpolate(self.a, &self.st, s[1..first]);
+        const right = try escape.interpolate(self.a, &self.st, s[first + 1 .. second]);
+        return .{ .truth = std.mem.eql(u8, left, right), .rest = s[second + 1 ..] };
+    }
+    const len = expr.tokenLen(s);
+    const text = try escape.interpolate(self.a, &self.st, s[0..len]);
+    const v = expr.eval(text) catch return .{ .truth = false, .rest = s[len..] };
+    return .{ .truth = v > 0, .rest = s[len..] };
+}
+
 /// The text of a whole-line comment (`.\" text`, `\" text`), or null.
 pub fn commentBody(l: []const u8) ?[]const u8 {
     var rest: []const u8 = undefined;
@@ -1155,7 +1155,7 @@ pub fn stripComment(l: []const u8) []const u8 {
 
 /// Splits request arguments: blanks separate them, double quotes group (a
 /// doubled quote inside is a literal quote).
-fn splitArgs(a: Allocator, s: []const u8) Allocator.Error![]const []const u8 {
+pub fn splitArgs(a: Allocator, s: []const u8) Allocator.Error![]const []const u8 {
     var out: std.ArrayList([]const u8) = .empty;
     var i: usize = 0;
     while (i < s.len) {

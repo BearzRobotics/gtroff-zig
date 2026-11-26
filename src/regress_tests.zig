@@ -264,3 +264,12 @@ test "BUG-026: mdoc text lines keep fonts and non-breaking blanks" {
 test "BUG-027: lone dots and blanks after the dot are control lines" {
     try expect(.mdoc, "one\n.\ntwo\n.\\}\n. Pp\nthree\n", "one two\n\nthree\n");
 }
+
+test "BUG-028: mdoc pages may use roff requests" {
+    try expect(.mdoc, ".ig\nIGNORED\n..\n.de ZZ\nbody \\\\$1\n..\n.if t TYPESET\n.ds X y\n\\*X\n", "y\n");
+    try expect(.mdoc, ".de ZZ\nbody \\\\$1\n..\n.ZZ called\n", "body called\n");
+    try expect(.mdoc, ".ie n yes\n.el no\n.if t \\{\n.Pp\nhidden\n.\\}\nafter\n", "yes after\n");
+    const out = try render(.mdoc, ".TS\nl l.\na\tb\n.TE\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "│ a │ b │") != null);
+}

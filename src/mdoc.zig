@@ -223,6 +223,21 @@ const Parser = struct {
     line_no: u32 = 0,
     keep_comments: bool = false,
 
+    // roff requests, which mdoc pages may use too.
+    macros: std.StringHashMapUnmanaged(*man.Macro) = .empty,
+    def: ?man.Definition = null,
+    skip_end: ?[]const u8 = null,
+    skip_depth: usize = 0,
+    cond_depth: usize = 0,
+    ie_results: [man.max_ie_depth]bool = undefined,
+    ie_count: usize = 0,
+    macro_depth: usize = 0,
+    expanded_lines: usize = 0,
+    expanded_bytes: usize = 0,
+    /// Lines of an open `.TS` table.
+    tbl: ?std.ArrayList([]const u8) = null,
+    padded_cells: usize = 0,
+
     fn node(self: *Parser, kind: md.Kind) Allocator.Error!*Node {
         const n = try self.a.create(Node);
         n.* = .{ .kind = kind, .line = self.line_no };
@@ -1021,12 +1036,163 @@ const Parser = struct {
         for (r.segments) |seg| try self.emit(seg.text, seg.font, true, false);
     }
 
+    // ---- roff requests -------------------------------------------------------
+
+    /// Runs the roff request or user macro on a control line (without its
+    /// dot). False when the line is for mdoc.
+    fn roffRequest(self: *Parser, body: []const u8) Allocator.Error!bool {
+        var name_end = std.mem.indexOfAny(u8, body, " \t") orelse body.len;
+        for ([_][]const u8{ "if\\", "ie\\", "el\\" }) |start| {
+            if (std.mem.startsWith(u8, body, start)) name_end = 2;
+        }
+        const name = body[0..name_end];
+        const rest = std.mem.trimStart(u8, body[name_end..], " \t");
+        const Roff = enum { ig, de, de1, am, am1, ds, @"if", ie, el, br, sp, nf, fi, TS };
+        const req = std.meta.stringToEnum(Roff, name) orelse {
+            const user_macro = self.macros.get(name) orelse return false;
+            try self.callMacro(user_macro, try man.splitArgs(self.a, rest));
+            return true;
+        };
+        switch (req) {
+            .@"if", .ie => try self.conditional(rest, req == .ie),
+            .el => {
+                var matched = false;
+                if (self.ie_count > 0) {
+                    self.ie_count -= 1;
+                    matched = self.ie_results[self.ie_count];
+                }
+                try self.branch(!matched, rest);
+            },
+            .ig, .de, .de1, .am, .am1 => {
+                const args = try man.splitArgs(self.a, rest);
+                const end_arg: usize = if (req == .ig) 0 else 1;
+                const end = if (args.len > end_arg) try std.fmt.allocPrint(self.a, ".{s}", .{args[end_arg]}) else "..";
+                if (req == .ig or args.len == 0) {
+                    self.skip_end = end;
+                } else self.def = .{ .name = args[0], .append = req == .am or req == .am1, .end = end };
+            },
+            .ds => {
+                const end = std.mem.indexOfAny(u8, rest, " \t") orelse rest.len;
+                var value = std.mem.trimStart(u8, rest[end..], " \t");
+                if (value.len > 0 and value[0] == '"') value = value[1..];
+                if (end > 0) try self.st.strings.put(self.a, rest[0..end], value);
+            },
+            .br => if (self.para) |p| {
+                if (self.target == p) try self.lineSep(true);
+            },
+            .sp => if (self.bd_literal) {
+                try self.code.append(self.a, '\n');
+            } else self.endPara(),
+            .nf => {
+                self.endPara();
+                self.bd_literal = true;
+            },
+            .fi => {
+                self.bd_literal = false;
+                try self.flushCode();
+            },
+            .TS => {
+                try self.flushCode();
+                self.endPara();
+                self.tbl = .empty;
+            },
+        }
+        return true;
+    }
+
+    fn conditional(self: *Parser, rest: []const u8, is_ie: bool) Allocator.Error!void {
+        var s = rest;
+        var negate = false;
+        while (s.len > 0 and s[0] == '!') : (s = s[1..]) negate = !negate;
+        const r = try man.evalCond(self, s);
+        const truth = r.truth != negate;
+        if (is_ie and self.ie_count < man.max_ie_depth) {
+            self.ie_results[self.ie_count] = truth;
+            self.ie_count += 1;
+        }
+        try self.branch(truth, std.mem.trimStart(u8, r.rest, " \t"));
+    }
+
+    fn branch(self: *Parser, truth: bool, body_in: []const u8) Allocator.Error!void {
+        var body = body_in;
+        const block_start = std.mem.startsWith(u8, body, "\\{");
+        if (block_start) body = std.mem.trimStart(u8, body[2..], " \t");
+        if (!truth) {
+            if (block_start) self.skip_depth = man.skipBraces(body, 1);
+            return;
+        }
+        if (body.len == 0 or self.cond_depth >= man.max_cond_depth) return;
+        self.cond_depth += 1;
+        defer self.cond_depth -= 1;
+        try self.line(body);
+    }
+
+    fn endDefinition(self: *Parser) Allocator.Error!void {
+        const d = self.def.?;
+        self.def = null;
+        const gop = try self.macros.getOrPut(self.a, d.name);
+        if (!d.append or !gop.found_existing) {
+            gop.value_ptr.* = try self.a.create(man.Macro);
+            gop.value_ptr.*.* = .{};
+        }
+        if (d.lines.items.len > 0) try gop.value_ptr.*.chunks.append(self.a, d.lines.items);
+    }
+
+    /// Runs a user macro within the same limits as the man(7) reader.
+    fn callMacro(self: *Parser, user: *man.Macro, args: []const []const u8) Allocator.Error!void {
+        if (self.macro_depth >= man.max_macro_depth) return;
+        self.macro_depth += 1;
+        defer self.macro_depth -= 1;
+        const chunks = user.chunks.items.len;
+        for (0..chunks) |c| {
+            for (user.chunks.items[c]) |bl| {
+                if (self.expanded_lines >= man.max_expanded_lines) return;
+                self.expanded_lines += 1;
+                const filled = try man.substArgs(self.a, bl, args, man.max_expanded_bytes - self.expanded_bytes) orelse {
+                    self.expanded_lines = man.max_expanded_lines;
+                    return;
+                };
+                self.expanded_bytes += filled.len;
+                try self.line(filled);
+            }
+        }
+    }
+
+    /// Builds the open table with the man(7) reader's tbl code.
+    fn endTable(self: *Parser) Allocator.Error!void {
+        const rows = self.tbl orelse return;
+        self.tbl = null;
+        var sub: man.Parser = .{ .a = self.a, .root = self.cur, .container = self.cur, .cur = self.cur, .st = self.st, .in_tbl = true, .tbl_lines = rows, .padded_cells = self.padded_cells };
+        try sub.endTable();
+        self.st = sub.st;
+        self.padded_cells = sub.padded_cells;
+    }
+
     fn line(self: *Parser, raw: []const u8) Allocator.Error!void {
         self.line_no += 1;
         var l = raw;
         if (l.len > 0 and l[l.len - 1] == '\r') l = l[0 .. l.len - 1];
         l = try escape.sanitize(self.a, l);
         const is_macro = l.len > 0 and (l[0] == '.' or l[0] == '\'');
+        if (self.def) |*d| {
+            if (man.endsDefinition(l, d.end)) {
+                try self.endDefinition();
+            } else try d.lines.append(self.a, try man.copyMode(self.a, l));
+            return;
+        }
+        if (self.skip_end) |end| {
+            if (man.endsDefinition(l, end)) self.skip_end = null;
+            return;
+        }
+        if (self.skip_depth > 0) {
+            self.skip_depth = man.skipBraces(l, self.skip_depth);
+            return;
+        }
+        if (std.mem.endsWith(u8, l, "\\}") and man.closesBlock(l)) l = l[0 .. l.len - 2];
+        if (self.tbl) |*rows| {
+            if (std.mem.startsWith(u8, l, ".TE")) return self.endTable();
+            return rows.append(self.a, l);
+        }
         if (man.commentBody(l)) |t| {
             // A comment inside a paragraph or literal block is dropped.
             if (self.keep_comments and self.para == null and !self.bd_literal and self.xo == null) {
@@ -1047,6 +1213,7 @@ const Parser = struct {
             const body = std.mem.trimStart(u8, l[1..], " \t");
             // An empty request, or one such as `.\\}` that only closes a block.
             if (body.len == 0 or body[0] == '\\') return;
+            if (try self.roffRequest(body)) return;
             words = try splitWords(self.a, body);
         }
 
@@ -1210,9 +1377,10 @@ pub fn parseOptions(gpa: Allocator, source: []const u8, options: man.Options) Al
     root.* = .{ .kind = .document, .line = 1 };
     root.build.open = false;
 
-    var p: Parser = .{ .a = a, .root = root, .cur = root, .target = root, .keep_comments = options.keep_comments };
+    var p: Parser = .{ .a = a, .root = root, .cur = root, .target = root, .st = try escape.State.init(a), .keep_comments = options.keep_comments };
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
+    try p.endTable();
     try p.endReference();
     try p.flushCode();
     return .{ .arena = arena, .root = root };
