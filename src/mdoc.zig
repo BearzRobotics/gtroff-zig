@@ -7,8 +7,11 @@
 //! mdoc(7) describes), function synopses, references and the text macros
 //! (`.Ex`, `.Rv`, `.St`, `.At`, `.Bx`, ...).
 //!
-//! Not supported (silently skipped): `.Sm`/`.Db` spacing modes, `.Bk`, column
-//! widths and offsets, `.Hf`, `.Tg`.
+//! Of the roff requests, `.ig`, `.de`/`.am`, `.ds`, `.nr`/`.rr`, `.if`/`.ie`/`.el`,
+//! `.br`, `.sp`, `.nf`/`.fi` and `.TS` are handled.
+//!
+//! Not supported (silently skipped): `.Db`, `.Bk`, `-offset`, `-compact`, the
+//! widths of column lists, `.Hf`, `.Tg`.
 
 const std = @import("std");
 const md = @import("md");

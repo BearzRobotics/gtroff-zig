@@ -5,8 +5,9 @@
 //!   .RS / .RE      block quote            .nf .fi .EX   code block
 //!   .B .I .BR ...  strong / emphasis      .UR .MT       links
 //!
-//! What roff can express and the tree cannot (exact indents, tabs, tbl layout,
-//! macros defined with .de) is approximated or dropped; see docs/architecture.md.
+//! User macros (`.de`) are run. What roff can express and the tree cannot (exact
+//! indents, tabs, tbl layout) is approximated or dropped, and expansion, nesting
+//! and table sizes are limited; see docs/architecture.md.
 
 const std = @import("std");
 const md = @import("md");
