@@ -1193,6 +1193,13 @@ const Parser = struct {
         self.padded_cells = sub.padded_cells;
     }
 
+    /// Writes the words of a `.Xo` that is still open.
+    fn endXo(self: *Parser) Allocator.Error!void {
+        const joined = self.xo orelse return;
+        self.xo = null;
+        try self.lineWords(joined.items, self.xo_inline);
+    }
+
     fn line(self: *Parser, raw: []const u8) Allocator.Error!void {
         self.line_no += 1;
         var l = raw;
@@ -1246,9 +1253,7 @@ const Parser = struct {
         if (self.xo != null) {
             // A section heading ends an unterminated `.Xo`.
             if (is_macro and words.len > 0 and (std.mem.eql(u8, words[0].text, "Sh") or std.mem.eql(u8, words[0].text, "Ss"))) {
-                const joined = self.xo.?.items;
-                self.xo = null;
-                try self.lineWords(joined, self.xo_inline);
+                try self.endXo();
             } else {
                 const w = if (is_macro) words else try splitWords(self.a, l);
                 if (is_macro and w.len > 0 and std.mem.eql(u8, w[0].text, "Xc")) {
@@ -1407,6 +1412,7 @@ pub fn parseOptions(gpa: Allocator, source: []const u8, options: man.Options) Al
     var p: Parser = .{ .a = a, .root = root, .cur = root, .target = root, .st = try escape.State.init(a), .keep_comments = options.keep_comments };
     var lines = std.mem.splitScalar(u8, source, '\n');
     while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
+    try p.endXo();
     try p.endTable();
     try p.endReference();
     try p.flushCode();

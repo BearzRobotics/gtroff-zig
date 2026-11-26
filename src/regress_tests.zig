@@ -284,3 +284,9 @@ test "BUG-029: punctuation after name macros is kept and not read as a name" {
 test "BUG-030: words after .Xc are kept" {
     try expect(.mdoc, ".Xo\n.Fl a\n.Xc Ar tail ,\nend\n", "**-a** _tail_, end\n");
 }
+
+test "BUG-031: an .Xo still open at the end of the page keeps its words" {
+    const out = try render(.mdoc, "before\n.Xo\n.Fl a\n.No kept words\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "**-a** kept words") != null);
+}
