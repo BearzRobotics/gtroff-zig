@@ -415,7 +415,19 @@ const Parser = struct {
 
     fn macro(self: *Parser, m: Callable, words: []const Word, start: usize) Allocator.Error!usize {
         const end = argsEnd(words, start);
-        const args = words[start..end];
+        var args = words[start..end];
+        // For macros whose arguments are names or versions, closing
+        // punctuation after them is not one of those.
+        var punct: []const Word = &.{};
+        switch (m) {
+            .Nm, .Fl, .Ar, .Xr, .At, .Bx, .Bsx, .Ox, .Fx, .Nx, .Dx, .Ux, .St, .Lb => {
+                var n = args.len;
+                while (n > 0 and isClosing(args[n - 1])) n -= 1;
+                punct = args[n..];
+                args = args[0..n];
+            },
+            else => {},
+        }
         switch (m) {
             // Fonts.
             .Ad, .Em, .Pa, .Va, .Vt, .Fa, .Ft, .Ot => {
@@ -430,7 +442,7 @@ const Parser = struct {
             .Fl => {
                 if (args.len == 0) {
                     // `.Fl Fl long` is "--long": a bare flag sticks to the next one.
-                    const next_is_fl = end < words.len and std.mem.eql(u8, words[end].text, "Fl");
+                    const next_is_fl = punct.len == 0 and end < words.len and std.mem.eql(u8, words[end].text, "Fl");
                     try self.emit("-", Font.b, false, next_is_fl);
                 } else try self.styled(Font.b, args, "-");
             },
@@ -622,21 +634,34 @@ const Parser = struct {
             },
 
             // Names of systems and standards.
-            .At => try self.emit(atName(args), .roman, false, false),
+            .At => {
+                try self.emit(atName(args), .roman, false, false);
+                if (args.len > 1) for (args[1..]) |d| try self.plainWord(d);
+            },
             .Bx => try self.systemName("BSD", args),
             .Bsx => try self.systemName("BSD/OS", args),
             .Ox => try self.systemName("OpenBSD", args),
             .Fx => try self.systemName("FreeBSD", args),
             .Nx => try self.systemName("NetBSD", args),
             .Dx => try self.systemName("DragonFly", args),
-            .Ux => try self.emit("UNIX", .roman, false, false),
+            .Ux => {
+                try self.emit("UNIX", .roman, false, false);
+                for (args) |d| try self.plainWord(d);
+            },
             .St => {
-                if (args.len > 0) try self.emit(standardName(args[0].text), .roman, false, false);
+                if (args.len > 0) {
+                    try self.emit(standardName(args[0].text), .roman, false, false);
+                    for (args[1..]) |d| try self.plainWord(d);
+                }
             },
             .Lb => {
-                if (args.len > 0) try self.emit(libraryName(args[0].text), .roman, false, false);
+                if (args.len > 0) {
+                    try self.emit(libraryName(args[0].text), .roman, false, false);
+                    for (args[1..]) |d| try self.plainWord(d);
+                }
             },
         }
+        for (punct) |d| try self.plainWord(d);
         return end;
     }
 

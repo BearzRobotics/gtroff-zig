@@ -273,3 +273,10 @@ test "BUG-028: mdoc pages may use roff requests" {
     defer testing.allocator.free(out);
     try testing.expect(std.mem.find(u8, out, "│ a │ b │") != null);
 }
+
+test "BUG-029: punctuation after name macros is kept and not read as a name" {
+    try expect(.mdoc, ".Nm foo\n.Pp\nRun\n.Nm .\nThen\n.Nm ,\n", "**foo**\n\nRun **foo**. Then **foo**,\n");
+    try expect(.mdoc, ".Fl Fl .\n.Pp\n.Xr ls .\n.Xr cp 1 ,\n", "**--**.\n\nls. cp(1),\n");
+    try expect(.mdoc, ".Ux .\n.At .\n.Bx .\n.Lb libm .\n", "UNIX. AT&T UNIX. BSD. Math Library (libm, -lm).\n");
+    try expect(.mdoc, ".Nm .\n.Nm real\n.Nm\n", ". **real** **real**\n");
+}
