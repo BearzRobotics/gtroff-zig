@@ -104,7 +104,7 @@ const Parser = struct {
                 '-' => v - r,
                 '*' => v * r,
                 '/' => if (@trunc(r) == 0) return error.DivisionByZero else @trunc(v) / @trunc(r),
-                '%' => if (@trunc(r) == 0) return error.DivisionByZero else @mod(@trunc(v), @trunc(r)),
+                '%' => if (@trunc(r) == 0) return error.DivisionByZero else remainder(@trunc(v), @trunc(r)),
                 '<' => if (v < r) 1 else 0,
                 '>' => if (v > r) 1 else 0,
                 'l' => if (v <= r) 1 else 0,
@@ -118,6 +118,11 @@ const Parser = struct {
         return v;
     }
 };
+
+/// The C remainder, as groff computes `%`: it has the sign of `a`.
+fn remainder(a: f64, b: f64) f64 {
+    return a - @trunc(a / b) * b;
+}
 
 /// Value of the whole of `s` as an integer (fractions are truncated).
 pub fn eval(s: []const u8) Error!i64 {
@@ -160,6 +165,8 @@ test "left to right, no precedence" {
     try std.testing.expectEqual(@as(i64, 1), try eval("7%3"));
     try std.testing.expectEqual(@as(i64, 2), try eval("17%5"));
     try std.testing.expectEqual(@as(i64, 0), try eval("9%3"));
+    try std.testing.expectEqual(@as(i64, -1), try eval("-7%3"));
+    try std.testing.expectEqual(@as(i64, 1), try eval("7%-3"));
     try std.testing.expectEqual(@as(i64, -3), try eval("-3"));
     try std.testing.expectEqual(@as(i64, 4), try eval("3.5n+1"));
 }
