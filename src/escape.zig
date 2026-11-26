@@ -386,18 +386,23 @@ pub fn columns(s: []const u8) ?u16 {
 /// The next input line, with `\`-newline continuations joined: a line that ends
 /// in an odd number of backslashes continues on the next one.
 pub fn nextLogicalLine(a: Allocator, lines: *std.mem.SplitIterator(u8, .scalar)) Allocator.Error!?[]const u8 {
-    var line = lines.next() orelse return null;
+    var line = withoutCr(lines.next() orelse return null);
     if (!endsWithContinuation(line)) return line;
     var buf: std.ArrayList(u8) = .empty;
     while (true) {
         try buf.appendSlice(a, line[0 .. line.len - 1]);
-        line = lines.next() orelse break;
+        line = withoutCr(lines.next() orelse break);
         if (!endsWithContinuation(line)) {
             try buf.appendSlice(a, line);
             break;
         }
     }
     return buf.items;
+}
+
+/// A line of a CRLF file without its `\r`.
+fn withoutCr(line: []const u8) []const u8 {
+    return if (std.mem.endsWith(u8, line, "\r")) line[0 .. line.len - 1] else line;
 }
 
 fn endsWithContinuation(line: []const u8) bool {

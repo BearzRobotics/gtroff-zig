@@ -415,3 +415,7 @@ test "BUG-049: .TH fields, comments and cell markup survive a round trip" {
     defer testing.allocator.free(table);
     try testing.expect(std.mem.find(u8, table, "\\fBb\\fR c <http://u.example>\n") != null);
 }
+
+test "BUG-052: lines continue in CRLF files" {
+    try expect(.man, ".nf\r\nab\\\r\ncd\r\n.fi\r\n", "abcd\n");
+}
