@@ -1254,6 +1254,8 @@ const Parser = struct {
                 if (is_macro and w.len > 0 and std.mem.eql(u8, w[0].text, "Xc")) {
                     self.xo_depth -|= 1;
                     if (self.xo_depth == 0) {
+                        // The rest of the `.Xc` line belongs to the joined line.
+                        try self.xo.?.appendSlice(self.a, w[1..]);
                         const joined = self.xo.?.items;
                         self.xo = null;
                         try self.lineWords(joined, self.xo_inline);

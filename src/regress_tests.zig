@@ -280,3 +280,7 @@ test "BUG-029: punctuation after name macros is kept and not read as a name" {
     try expect(.mdoc, ".Ux .\n.At .\n.Bx .\n.Lb libm .\n", "UNIX. AT&T UNIX. BSD. Math Library (libm, -lm).\n");
     try expect(.mdoc, ".Nm .\n.Nm real\n.Nm\n", ". **real** **real**\n");
 }
+
+test "BUG-030: words after .Xc are kept" {
+    try expect(.mdoc, ".Xo\n.Fl a\n.Xc Ar tail ,\nend\n", "**-a** _tail_, end\n");
+}
