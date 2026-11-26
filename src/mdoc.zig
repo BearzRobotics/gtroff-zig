@@ -1126,12 +1126,7 @@ const Parser = struct {
                     self.skip_end = end;
                 } else self.def = .{ .name = args[0], .append = req == .am or req == .am1, .end = end };
             },
-            .ds => {
-                const end = std.mem.indexOfAny(u8, rest, " \t") orelse rest.len;
-                var value = std.mem.trimStart(u8, rest[end..], " \t");
-                if (value.len > 0 and value[0] == '"') value = value[1..];
-                if (end > 0) try self.st.strings.put(self.a, rest[0..end], value);
-            },
+            .ds => try man.defineString(self.a, &self.st, rest),
             .br => if (self.para) |p| {
                 if (self.target == p) try self.lineSep(true);
             },

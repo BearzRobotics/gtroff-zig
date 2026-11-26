@@ -674,12 +674,7 @@ pub const Parser = struct {
                 try self.addRun(target, "]", .roman);
             },
             .YS => self.endPara(),
-            .ds => {
-                if (args.len >= 1) {
-                    const value = if (args.len > 1) try std.mem.join(self.a, " ", args[1..]) else "";
-                    try self.st.strings.put(self.a, args[0], value);
-                }
-            },
+            .ds => try defineString(self.a, &self.st, rest),
             .de, .am, .de1, .am1, .dei, .ami, .dei1, .ami1 => {
                 // `.de NAME [END]`: the body ends at `..`, or at `.END` if given.
                 const end = if (args.len > 1) try std.fmt.allocPrint(self.a, ".{s}", .{args[1]}) else "..";
@@ -1109,6 +1104,15 @@ pub fn evalCond(self: anytype, s: []const u8) Allocator.Error!Cond {
     const text = try escape.interpolate(self.a, &self.st, s[0..len]);
     const v = expr.eval(text) catch return .{ .truth = false, .rest = s[len..] };
     return .{ .truth = v > 0, .rest = s[len..] };
+}
+
+/// `.ds name value`: the value is the rest of the line as written, less one
+/// leading double quote.
+pub fn defineString(a: Allocator, st: *escape.State, rest: []const u8) Allocator.Error!void {
+    const end = std.mem.indexOfAny(u8, rest, " \t") orelse rest.len;
+    var value = std.mem.trimStart(u8, rest[end..], " \t");
+    if (value.len > 0 and value[0] == '"') value = value[1..];
+    if (end > 0) try st.strings.put(a, rest[0..end], value);
 }
 
 /// The text of a whole-line comment (`.\" text`, `\" text`), or null.

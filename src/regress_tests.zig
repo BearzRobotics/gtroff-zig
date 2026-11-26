@@ -324,3 +324,12 @@ test "BUG-037: conditions may have blanks inside parentheses" {
 test "BUG-038: size escapes leave the digits that follow them" {
     try expect(.man, "\\s05 files and \\s-12 items \\s12x \\s(425\n", "5 files and 2 items x 5\n");
 }
+
+test "BUG-039: a .ds value is the rest of the line" {
+    try expect(.man, ".ds Q \"hello world\"\n.ds E \"\"\n[\\*Q] [\\*E]\n", "[hello world\"] [\"]\n");
+    var doc = try gtroff.parseMan(testing.allocator, ".ds S a    b\n\\*S\n");
+    defer doc.deinit();
+    const html = try doc.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(html);
+    try testing.expectEqualStrings("<p>a    b</p>\n", html);
+}
