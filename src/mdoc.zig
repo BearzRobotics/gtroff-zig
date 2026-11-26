@@ -22,7 +22,12 @@ const max_levels = 16;
 /// Deepest nesting of enclosure macros on one line; further ones are ignored.
 const max_nest = 32;
 
-const Word = struct { text: []const u8, quoted: bool = false };
+const Word = struct {
+    text: []const u8,
+    quoted: bool = false,
+    /// From a text line joined by `.Xo`: never a macro or a macro's argument.
+    plain: bool = false,
+};
 
 /// Macros that can appear inside the arguments of another macro.
 const Callable = enum {
@@ -316,13 +321,13 @@ const Parser = struct {
     }
 
     fn isCallable(w: Word) bool {
-        return !w.quoted and std.meta.stringToEnum(Callable, w.text) != null;
+        return !w.quoted and !w.plain and std.meta.stringToEnum(Callable, w.text) != null;
     }
 
     /// Index of the first callable macro at or after `start`.
     fn argsEnd(words: []const Word, start: usize) usize {
         var i = start;
-        while (i < words.len) : (i += 1) if (isCallable(words[i])) return i;
+        while (i < words.len) : (i += 1) if (words[i].plain or isCallable(words[i])) return i;
         return words.len;
     }
 
@@ -1294,7 +1299,9 @@ const Parser = struct {
                         return;
                     }
                 }
-                for (w) |x| {
+                for (w) |word| {
+                    var x = word;
+                    x.plain = !is_macro;
                     if (!x.quoted and std.mem.eql(u8, x.text, "Xo")) self.xo_depth += 1;
                     try self.xo.?.append(self.a, x);
                 }

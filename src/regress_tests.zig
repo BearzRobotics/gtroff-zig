@@ -304,3 +304,7 @@ test "BUG-032: column list cells stay in their rows" {
         "<p>after</p>",
     }) |want| try testing.expect(std.mem.find(u8, html, want) != null);
 }
+
+test "BUG-066: a text line inside .Xo is not an argument of the macro before it" {
+    try expect(.mdoc, ".Xo\n.Fl a\nkept words\n.Xc\n", "**-a** kept words\n");
+}
