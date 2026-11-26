@@ -417,11 +417,6 @@ const Parser = struct {
         return out.items;
     }
 
-    /// Text of the arguments of a text macro such as `.At` or `.Bx`.
-    fn argText(self: *Parser, args: []const Word) Allocator.Error![]const u8 {
-        return self.joinWords(args);
-    }
-
     fn macro(self: *Parser, m: Callable, words: []const Word, start: usize) Allocator.Error!usize {
         const end = argsEnd(words, start);
         var args = words[start..end];
@@ -888,8 +883,7 @@ const Parser = struct {
         };
     }
 
-    fn textMacro(self: *Parser, words: []const Word, plural: []const u8, single_pre: []const u8, single_post: []const u8, multi_post: []const u8, call_style: bool) Allocator.Error!void {
-        _ = plural;
+    fn textMacro(self: *Parser, words: []const Word, single_pre: []const u8, single_post: []const u8, multi_post: []const u8, call_style: bool) Allocator.Error!void {
         // `.Ex -std [name ...]` and `.Rv -std [name ...]`.
         var names: std.ArrayList([]const u8) = .empty;
         for (words) |w| {
@@ -903,7 +897,9 @@ const Parser = struct {
         self.space = false;
         try self.emit(single_pre, .roman, false, false);
         for (names.items, 0..) |n, i| {
-            if (i > 0) try self.emit(if (i + 1 == names.items.len) "and" else ",", .roman, i + 1 != names.items.len, false);
+            // "a and b"; "a, b, and c".
+            if (i > 0 and names.items.len > 2) try self.emit(",", .roman, true, false);
+            if (i > 0 and i + 1 == names.items.len) try self.emit("and", .roman, false, false);
             const label = if (call_style) try std.fmt.allocPrint(self.a, "{s}()", .{n}) else n;
             try self.emit(label, Font.b, false, false);
         }
@@ -961,7 +957,7 @@ const Parser = struct {
             if (part.len == 0) continue;
             if (!first) try self.addRun(p, ", ", .roman);
             first = false;
-            try self.addRun(p, part, if (part.ptr == r.title.ptr) Font.roman else Font.roman);
+            try self.addRun(p, part, if (part.ptr == r.title.ptr) Font.i else Font.roman);
         }
         const tail = [_][]const u8{ r.volume, r.number, r.pages, r.date };
         for (tail) |part| {
@@ -1074,8 +1070,8 @@ const Parser = struct {
                 }
             },
             .Ef => self.base_font = .roman,
-            .Ex => try self.textMacro(args, "", "The ", " utility exits 0 on success, and >0 if an error occurs.", " utilities exit 0 on success, and >0 if an error occurs.", false),
-            .Rv => try self.textMacro(args, "", "The ", " function returns the value 0 if successful; otherwise the value -1 is returned and the global variable errno is set to indicate the error.", " functions return the value 0 if successful; otherwise the value -1 is returned and the global variable errno is set to indicate the error.", true),
+            .Ex => try self.textMacro(args, "The ", " utility exits 0 on success, and >0 if an error occurs.", " utilities exit 0 on success, and >0 if an error occurs.", false),
+            .Rv => try self.textMacro(args, "The ", " function returns the value 0 if successful; otherwise the value -1 is returned and the global variable errno is set to indicate the error.", " functions return the value 0 if successful; otherwise the value -1 is returned and the global variable errno is set to indicate the error.", true),
             .Rs => self.rs = .{},
             .Re => try self.endReference(),
             .@"%A" => try self.refField("A", args),

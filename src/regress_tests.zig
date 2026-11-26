@@ -476,3 +476,8 @@ test "BUG-059: nodes carry source line numbers" {
         try testing.expectEqualSlices(u32, &.{ 5, 8, 12 }, lines[0..n]);
     }
 }
+
+test "BUG-061: reference titles are italic and three names take a serial comma" {
+    try expect(.mdoc, ".Ex -std a b c\n", "The **a**, **b**, and **c** utilities exit 0 on success, and >0 if an error occurs.\n");
+    try expect(.mdoc, ".Rs\n.%A X\n.%T Title\n.Re\n", "X, _Title_.\n");
+}

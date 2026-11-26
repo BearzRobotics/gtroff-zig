@@ -225,7 +225,7 @@ test "mdoc: lists, displays, functions and references" {
         \\
         \\       **open**(_const char *path_, _int flags_)
         \\
-        \\       A. Author, A Title, 1999.
+        \\       A. Author, _A Title_, 1999.
         \\
         \\## STANDARDS
         \\
