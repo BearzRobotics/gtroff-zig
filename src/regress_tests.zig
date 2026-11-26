@@ -161,3 +161,11 @@ test "BUG-013: table cells are always data" {
     defer testing.allocator.free(out);
     try testing.expect(std.mem.find(u8, out, "h\n\\&.so /etc/hostname\n\\&_\nT{\\&\n\\&.TE\n.TE\n") != null);
 }
+
+test "BUG-015: --!> does not end a kept comment" {
+    var doc = try gtroff.parseManOptions(testing.allocator, ".\\\" x --!> <img src=x>\n", .{ .keep_comments = true });
+    defer doc.deinit();
+    const out = try doc.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(out);
+    try testing.expectEqualStrings("<!-- x --! > <img src=x> -->\n", out);
+}

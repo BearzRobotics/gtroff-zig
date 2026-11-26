@@ -1044,7 +1044,8 @@ pub fn commentBody(l: []const u8) ?[]const u8 {
     return std.mem.trimEnd(u8, rest, " \t\r");
 }
 
-/// `text` as an HTML comment; a `-->` inside it is broken up so it cannot end the comment early.
+/// `text` as an HTML comment; a `-->` or `--!>` inside it, either of which ends
+/// an HTML comment, is broken up.
 pub fn htmlComment(a: Allocator, text: []const u8) Allocator.Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(a, "<!-- ");
@@ -1053,6 +1054,9 @@ pub fn htmlComment(a: Allocator, text: []const u8) Allocator.Error![]const u8 {
         if (std.mem.startsWith(u8, text[i..], "-->")) {
             try out.appendSlice(a, "-- >");
             i += 2;
+        } else if (std.mem.startsWith(u8, text[i..], "--!>")) {
+            try out.appendSlice(a, "--! >");
+            i += 3;
         } else try out.append(a, text[i]);
     }
     try out.appendSlice(a, " -->");
