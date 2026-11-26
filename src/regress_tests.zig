@@ -320,3 +320,7 @@ test "BUG-037: conditions may have blanks inside parentheses" {
     try testing.expectEqual(@as(i64, 6), try gtroff.expr.eval("( ( 1 + 2 ) * 2 )"));
     try testing.expectError(error.Syntax, gtroff.expr.eval("1 + 2"));
 }
+
+test "BUG-038: size escapes leave the digits that follow them" {
+    try expect(.man, "\\s05 files and \\s-12 items \\s12x \\s(425\n", "5 files and 2 items x 5\n");
+}

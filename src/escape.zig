@@ -319,15 +319,23 @@ pub fn segments(a: Allocator, st: *State, line_in: []const u8) Allocator.Error!R
             },
             's' => {
                 // Size change: \s0, \s+2, \s-1, \s12, \s(12
-                if (i < line.len and (line[i] == '+' or line[i] == '-')) i += 1;
+                const signed = i < line.len and (line[i] == '+' or line[i] == '-');
+                if (signed) i += 1;
                 if (i < line.len and (line[i] == '[' or line[i] == '\'')) {
                     const close: u8 = if (line[i] == '[') ']' else '\'';
                     i = if (std.mem.indexOfScalarPos(u8, line, i + 1, close)) |end| end + 1 else line.len;
                     continue;
                 }
-                if (i < line.len and line[i] == '(') i += 1;
+                var wanted: usize = 1;
+                if (i < line.len and line[i] == '(') {
+                    i += 1;
+                    wanted = 2;
+                } else if (!signed and i + 1 < line.len and line[i] >= '1' and line[i] <= '3') {
+                    // Only \\s10 to \\s39 take two digits without a `(`.
+                    wanted = 2;
+                }
                 var digits: usize = 0;
-                while (i < line.len and std.ascii.isDigit(line[i]) and digits < 2) : (digits += 1) i += 1;
+                while (i < line.len and std.ascii.isDigit(line[i]) and digits < wanted) : (digits += 1) i += 1;
             },
             // Superscript, subscript, reverse motion and similar take no argument.
             'u', 'd', 'r', 'p', 'a' => {},
