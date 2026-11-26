@@ -28,6 +28,9 @@ const Definition = struct {
 
 /// Deepest nesting of user macro calls followed.
 const max_macro_depth = 16;
+/// Most lines all macro calls of one page may run. The depth limit alone does
+/// not bound the work: a macro that calls itself eight times makes 8^16 calls.
+const max_expanded_lines = 100_000;
 
 /// True when `l` ends a macro definition or `.ig` block. The end is `..` or
 /// `.NAME`, and blanks are allowed after the first dot (Asciidoctor writes `.  .`).
@@ -115,6 +118,7 @@ const Parser = struct {
     /// The macro being defined, until its end line.
     def: ?Definition = null,
     macro_depth: usize = 0,
+    expanded_lines: usize = 0,
     skip_depth: usize = 0,
     last_cond: bool = false,
     /// Indent (columns) used by `.TP`, `.IP` and `.RS` when they give none.
@@ -779,7 +783,11 @@ const Parser = struct {
         const saved_args = self.st.regs.get(".$") orelse 0;
         try self.st.regs.put(self.a, ".$", @intCast(args.len));
         defer self.st.regs.put(self.a, ".$", saved_args) catch {};
-        for (body) |bl| try self.line(try substArgs(self.a, bl, args));
+        for (body) |bl| {
+            if (self.expanded_lines >= max_expanded_lines) break;
+            self.expanded_lines += 1;
+            try self.line(try substArgs(self.a, bl, args));
+        }
     }
 
     fn isRequestInNofill(l: []const u8) bool {

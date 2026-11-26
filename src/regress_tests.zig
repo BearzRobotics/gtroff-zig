@@ -72,3 +72,7 @@ test "BUG-005: a written table reads back with its columns" {
     defer testing.allocator.free(html);
     try testing.expect(std.mem.find(u8, html, "<td>apple</td>\n<td>12</td>") != null);
 }
+
+test "BUG-006: macros that fan out stop after a bounded amount of work" {
+    try expect(.man, ".de A\n" ++ ".A\n.A\n.A\n.A\n.A\n.A\n.A\n.A\n" ++ "..\n.A\ndone\n", "done\n");
+}
