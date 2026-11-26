@@ -86,7 +86,17 @@ pub fn substArgs(a: Allocator, l: []const u8, args: []const []const u8, limit: u
                 for (args, 0..) |arg, k| {
                     if (out.items.len > limit) return null;
                     if (k > 0) try out.append(a, ' ');
-                    try out.appendSlice(a, arg);
+                    if (c == '*') {
+                        try out.appendSlice(a, arg);
+                        continue;
+                    }
+                    // `\\$@` quotes each argument, so it stays one.
+                    try out.append(a, '"');
+                    for (arg) |ch| {
+                        if (ch == '"') try out.append(a, '"');
+                        try out.append(a, ch);
+                    }
+                    try out.append(a, '"');
                 }
                 i += 2;
                 continue;

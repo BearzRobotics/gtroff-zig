@@ -333,3 +333,7 @@ test "BUG-039: a .ds value is the rest of the line" {
     defer testing.allocator.free(html);
     try testing.expectEqualStrings("<p>a    b</p>\n", html);
 }
+
+test "BUG-040: \\$@ keeps the arguments apart" {
+    try expect(.man, ".de X\n.BR \\\\$@\n..\n.X \"a b\" c\n", "**a b**c\n");
+}
