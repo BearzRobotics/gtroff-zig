@@ -123,6 +123,9 @@ pub const Macro = struct {
     chunks: std.ArrayList([]const []const u8) = .empty,
 };
 
+/// Indent of tagged paragraphs until one gives another.
+const default_indent: u16 = 7;
+
 pub const Parser = struct {
     a: Allocator,
     root: *Node,
@@ -169,7 +172,7 @@ pub const Parser = struct {
     ie_count: usize = 0,
     cond_depth: usize = 0,
     /// Indent (columns) used by `.TP`, `.IP` and `.RS` when they give none.
-    indent: u16 = 7,
+    indent: u16 = default_indent,
     continued: bool = false,
     line_no: u32 = 0,
     /// Keep `.\"` comment lines as HTML comments in the tree.
@@ -248,6 +251,7 @@ pub const Parser = struct {
             }
         }
         self.depth = 0;
+        self.indent = default_indent;
         const h = try self.node(.heading);
         h.level = level;
         // `.SH` heading at the left edge, its body in a quote indented 7;
@@ -605,7 +609,10 @@ pub const Parser = struct {
             },
             .SH => try self.heading(2, args),
             .SS => try self.heading(3, args),
-            .PP, .P, .LP, .HP => try self.endGroup(),
+            .PP, .P, .LP, .HP => {
+                try self.endGroup();
+                self.indent = default_indent;
+            },
             .TP, .TQ => try self.startTagged(null, if (args.len > 0) args[0] else null),
             .IP => {
                 if (args.len == 0) {

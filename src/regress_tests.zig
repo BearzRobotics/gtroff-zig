@@ -345,3 +345,16 @@ test "BUG-041: a custom end marker must be the whole name" {
 test "BUG-042: a .SH without a title does not take the text after the next one" {
     try expect(.man, ".SH\n.SH B\nbody text\n", "## B\n\n       body text\n");
 }
+
+test "BUG-043: .SH and .PP reset the tagged paragraph indent" {
+    var doc = try gtroff.parseMan(testing.allocator, ".TP 20\na\nb\n.SH NEW\n.TP\nc\nd\n.TP 12\ne\nf\n.PP\n.TP\ng\nh\n");
+    defer doc.deinit();
+    var walker = md.Walker.init(doc.root);
+    var got: [4]u16 = undefined;
+    var n: usize = 0;
+    while (walker.next()) |ev| if (ev.entering and ev.node.kind == .deflist_def) {
+        got[n] = ev.node.indent;
+        n += 1;
+    };
+    try testing.expectEqualSlices(u16, &.{ 20, 7, 12, 7 }, got[0..n]);
+}
