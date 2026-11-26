@@ -265,6 +265,7 @@ pub const Parser = struct {
         }
         self.depth = 0;
         self.indent = default_indent;
+        self.one_shot = null;
         const h = try self.node(.heading);
         h.level = level;
         // `.SH` heading at the left edge, its body in a quote indented 7;
@@ -456,6 +457,8 @@ pub const Parser = struct {
             self.one_shot = font;
             return;
         }
+        // This is the "next line" an earlier bare font macro waited for.
+        self.one_shot = null;
         const target = try self.sink();
         const was_term = self.pending_term != null or self.pending_heading != null;
         try self.lineSep(target);
@@ -469,6 +472,7 @@ pub const Parser = struct {
 
     /// `.BR`, `.IB`, ...: arguments alternate between two fonts, no spaces.
     fn alternating(self: *Parser, f0: Font, f1: Font, args: []const []const u8) Allocator.Error!void {
+        self.one_shot = null;
         const target = try self.sink();
         const was_term = self.pending_term != null or self.pending_heading != null;
         try self.lineSep(target);

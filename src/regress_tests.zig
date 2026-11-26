@@ -423,3 +423,7 @@ test "BUG-052: lines continue in CRLF files" {
 test "BUG-053: \\f[] returns to the previous font" {
     try expect(.man, "\\fBbold\\f[] roman\n", "**bold** roman\n");
 }
+
+test "BUG-054: a bare font macro applies to the next line only" {
+    try expect(.man, ".B\n.BR x y\nplain\n", "**x**y plain\n");
+}
