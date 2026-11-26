@@ -79,5 +79,9 @@ one machine; it is not a conformance claim.
 
 The result is an ordinary `md.Document`; HTML output or a GTK viewer work the
 same as for Markdown. See `docs/architecture.md` for how roff maps to the tree
-and what is lost, and `docs/decisions/` for the reasoning. Tests: `zig build test`.
+and what is lost, and `docs/decisions/` for the reasoning.
+
+Tests: `zig build test`, which includes a quick fuzz pass over fixed seeds. A
+longer coverage guided search: `zig build test --fuzz=100K -Doptimize=ReleaseSafe`
+(see `src/fuzz_tests.zig`).
 License: MIT.

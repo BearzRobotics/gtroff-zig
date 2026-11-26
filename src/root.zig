@@ -39,4 +39,5 @@ test {
     _ = @import("tests.zig");
     _ = @import("write_tests.zig");
     _ = @import("regress_tests.zig");
+    _ = @import("fuzz_tests.zig");
 }

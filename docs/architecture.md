@@ -92,11 +92,19 @@ error.
 | Parentheses in an expression | 64 |
 | mdoc enclosure macros nested on a line | 32 |
 | `.RS` and `.Bl` nesting | 16 |
+| Tables inside the `T{` blocks of tables | 2 |
 | Cells in a table row (more are joined into the last) | 64 |
 | Empty cells added to even out table rows, per page | 65,536 |
 
 These limits bound expansion, not the size of the input: memory still grows with
 the page. A caller that reads untrusted files should cap their size.
+
+The limits are generous. A page written to use them up can be small and still
+need a lot of memory: measured trees were about 1.5 GB from a 4 KB man or mdoc
+page (a self calling macro making many font changes), 1.2 GB from 356 bytes of
+mdoc column cells, and 550 MB from 168 bytes of table rows made by a macro. A
+caller that needs a lower ceiling must also limit the memory of the reader, for
+example with its own allocator.
 
 Control characters other than tab, and invalid UTF-8, are replaced with U+FFFD,
 and `\[uXXXX]` cannot produce them. Link addresses are kept as written: use
