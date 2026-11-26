@@ -250,7 +250,8 @@ pub fn segments(a: Allocator, st: *State, line_in: []const u8) Allocator.Error!R
                 const nm = readName(line[i..]) orelse break;
                 i += nm.used;
                 try flush(a, &out, &buf, run_font);
-                if (std.mem.eql(u8, nm.name, "P")) {
+                // `\\f[]`, like `\\fP`, returns to the previous font.
+                if (nm.name.len == 0 or std.mem.eql(u8, nm.name, "P")) {
                     st.font = st.prev;
                 } else if (Font.fromName(nm.name)) |f| {
                     st.setFont(f);

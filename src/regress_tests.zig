@@ -419,3 +419,7 @@ test "BUG-049: .TH fields, comments and cell markup survive a round trip" {
 test "BUG-052: lines continue in CRLF files" {
     try expect(.man, ".nf\r\nab\\\r\ncd\r\n.fi\r\n", "abcd\n");
 }
+
+test "BUG-053: \\f[] returns to the previous font" {
+    try expect(.man, "\\fBbold\\f[] roman\n", "**bold** roman\n");
+}
