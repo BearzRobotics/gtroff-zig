@@ -10,7 +10,9 @@
 //!   HTML comment        .\" comment    front matter       .\" lines
 //!
 //! Comments survive: read a page with `Options.keep_comments` and every
-//! `.\"` line is an HTML comment in the tree; the writer turns each one back
+//! whole-line `.\"` comment is an HTML comment in the tree (one inside a
+//! heading, term, link or no-fill block moves to just after it; those inside
+//! macro definitions and skipped blocks are not kept). The writer turns each back
 //! into `.\"` lines (and `<!-- -->` from a Markdown file becomes one too).
 //! Raw HTML other than comments has no roff form and is left out; images are
 //! written as their alt text. Man pages read by this library carry layout
@@ -125,8 +127,19 @@ const Gen = struct {
             if (c.kind != .html_block) break;
             try self.comment(c.literal);
         }
+        var date = self.opts.date;
+        var source = self.opts.source;
+        var manual = self.opts.manual;
         // A level-1 heading `name(section)` is the page title.
         if (start) |f| if (f.kind == .heading and f.level == 1) {
+            // Fields kept by the man(7) reader; the options override them.
+            var fields = std.mem.splitScalar(u8, f.title, '\n');
+            const kept_date = fields.next() orelse "";
+            const kept_source = fields.next() orelse "";
+            const kept_manual = fields.next() orelse "";
+            if (date.len == 0) date = kept_date;
+            if (source.len == 0) source = kept_source;
+            if (manual.len == 0) manual = kept_manual;
             const t = try self.plain(f);
             const paren = std.mem.lastIndexOfScalar(u8, t, '(');
             if (paren != null and t.len > paren.? + 2 and t[t.len - 1] == ')') {
@@ -140,13 +153,13 @@ const Gen = struct {
         try self.quoted(title);
         try self.raw(" ");
         try self.quoted(section);
-        if (self.opts.date.len != 0 or self.opts.source.len != 0 or self.opts.manual.len != 0) {
+        if (date.len != 0 or source.len != 0 or manual.len != 0) {
             try self.raw(" ");
-            try self.quoted(self.opts.date);
+            try self.quoted(date);
             try self.raw(" ");
-            try self.quoted(self.opts.source);
+            try self.quoted(source);
             try self.raw(" ");
-            try self.quoted(self.opts.manual);
+            try self.quoted(manual);
         }
         try self.raw("\n");
         try self.blocksFrom(start, false);
@@ -362,7 +375,7 @@ const Gen = struct {
             const row_start = self.out.items.len;
             while (cell) |cl| : (cell = cl.next) {
                 if (cl.prev != null) try self.raw("\t");
-                try self.raw(try self.plainEsc(cl));
+                try self.raw(try self.cellText(cl));
             }
             // A blank line would not be read as a row.
             if (self.out.items.len == row_start) try self.raw("\\&");
@@ -417,18 +430,21 @@ const Gen = struct {
         return out.items;
     }
 
-    /// `plain`, escaped for use inside a tbl cell.
-    fn plainEsc(self: *Gen, n: *Node) Error![]const u8 {
-        return self.cellData(try self.plain(n));
+    /// One tbl cell: its inlines on one line, with fonts. A link is written as
+    /// its text and address, since `.UR` needs lines of its own. Nothing in the
+    /// cell may be read as a request, a rule, a text block or the end of a cell.
+    fn cellText(self: *Gen, n: *Node) Error![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        try self.cellInlines(n, .{}, &out);
+        const rule = std.mem.eql(u8, out.items, "_") or std.mem.eql(u8, out.items, "=");
+        if (rule or (out.items.len > 0 and (out.items[0] == '.' or out.items[0] == '\''))) try out.insertSlice(self.a, 0, "\\&");
+        if (std.mem.endsWith(u8, std.mem.trimEnd(u8, out.items, " "), "T{")) try out.appendSlice(self.a, "\\&");
+        return out.items;
     }
 
-    /// `p` as the data of a tbl cell: nothing in it may be read as a request, a
-    /// rule, a text block or the end of a cell or row.
-    fn cellData(self: *Gen, p: []const u8) Allocator.Error![]const u8 {
-        var out: std.ArrayList(u8) = .empty;
-        const rule = std.mem.eql(u8, p, "_") or std.mem.eql(u8, p, "=");
-        if (rule or (p.len > 0 and (p[0] == '.' or p[0] == '\''))) try out.appendSlice(self.a, "\\&");
-        for (p) |c| {
+    /// Escapes `s` as cell data.
+    fn cellData(self: *Gen, s: []const u8, out: *std.ArrayList(u8)) Allocator.Error!void {
+        for (s) |c| {
             switch (c) {
                 '\\' => try out.appendSlice(self.a, "\\e"),
                 '-' => try out.appendSlice(self.a, "\\-"),
@@ -437,8 +453,40 @@ const Gen = struct {
                 else => try out.append(self.a, c),
             }
         }
-        if (std.mem.endsWith(u8, std.mem.trimEnd(u8, out.items, " "), "T{")) try out.appendSlice(self.a, "\\&");
-        return out.items;
+    }
+
+    fn cellInlines(self: *Gen, parent: *Node, font: Font, out: *std.ArrayList(u8)) Error!void {
+        try self.enter();
+        defer self.depth -= 1;
+        var child = parent.first_child;
+        while (child) |c| : (child = c.next) {
+            var to = font;
+            switch (c.kind) {
+                .code => to.mono = true,
+                .emph => to.italic = true,
+                .strong => to.bold = true,
+                else => {},
+            }
+            if (!to.eql(font)) try out.appendSlice(self.a, to.esc());
+            switch (c.kind) {
+                .text, .code => try self.cellData(c.literal, out),
+                .softbreak, .linebreak => try out.append(self.a, ' '),
+                .footnote_ref => {
+                    try out.append(self.a, '[');
+                    try self.cellData(c.literal, out);
+                    try out.append(self.a, ']');
+                },
+                .emph, .strong, .strikethrough, .image => try self.cellInlines(c, to, out),
+                .link => {
+                    try self.cellInlines(c, to, out);
+                    try out.appendSlice(self.a, " <");
+                    try self.cellData(c.literal, out);
+                    try out.append(self.a, '>');
+                },
+                else => {},
+            }
+            if (!to.eql(font)) try out.appendSlice(self.a, font.esc());
+        }
     }
 
     fn inlines(self: *Gen, parent: *Node, font: Font, _: bool) Error!void {

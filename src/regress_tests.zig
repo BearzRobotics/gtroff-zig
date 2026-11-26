@@ -402,3 +402,16 @@ test "BUG-047: | is a delimiter, not a flag" {
 test "BUG-048: .Eo, .Ec, .En and .Ud keep their text" {
     try expect(.mdoc, ".Eo ( inside Ec )\n.Pp\n.Ud\n.Pp\n.En word\n", "(inside)\n\ncurrently under development.\n\nword\n");
 }
+
+test "BUG-049: .TH fields, comments and cell markup survive a round trip" {
+    const page = ".TH LS 1 \"June 2026\" \"coreutils 9\" \"User Commands\"\n.SH NAME\nls\n.nf\ncode\n.\\\" in no-fill\nmore\n.fi\n.TP\n.\\\" in term\nterm\ndef\n";
+    const out = try writeFrom(gtroff.parseManOptions(testing.allocator, page, .{ .keep_comments = true }), .{});
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.startsWith(u8, out, ".TH \"LS\" \"1\" \"June 2026\" \"coreutils 9\" \"User Commands\"\n"));
+    try testing.expect(std.mem.find(u8, out, "code\nmore\n") != null);
+    try testing.expect(std.mem.find(u8, out, ".\\\" in no-fill\n") != null);
+    try testing.expect(std.mem.find(u8, out, ".\\\" in term\n") != null);
+    const table = try writeFrom(markdown("| a |\n|---|\n| **b** [c](http://u.example) |\n"), .{});
+    defer testing.allocator.free(table);
+    try testing.expect(std.mem.find(u8, table, "\\fBb\\fR c <http://u.example>\n") != null);
+}

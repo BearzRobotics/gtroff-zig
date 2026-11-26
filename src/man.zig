@@ -177,6 +177,9 @@ pub const Parser = struct {
     line_no: u32 = 0,
     /// Keep `.\"` comment lines as HTML comments in the tree.
     keep_comments: bool = false,
+    /// Comments waiting for a place: they stood in a heading, term, link or
+    /// no-fill block.
+    deferred: std.ArrayList(*Node) = .empty,
 
     fn node(self: *Parser, kind: md.Kind) Allocator.Error!*Node {
         const n = try self.a.create(Node);
@@ -211,6 +214,12 @@ pub const Parser = struct {
         b.indent = Node.flush;
         self.cur.appendChild(b);
         self.code.clearRetainingCapacity();
+        self.placeComments();
+    }
+
+    fn placeComments(self: *Parser) void {
+        for (self.deferred.items) |n| self.cur.appendChild(n);
+        self.deferred.clearRetainingCapacity();
     }
 
     /// Where inline content goes now.
@@ -233,6 +242,7 @@ pub const Parser = struct {
         if (self.link != null or self.continued) return;
         if (self.pending_heading != null) self.pending_heading = null;
         if (self.pending_term != null) self.pending_term = null;
+        self.placeComments();
     }
 
     /// Body text of a section is indented by this many columns, a subsection
@@ -610,6 +620,16 @@ pub const Parser = struct {
                 const section = if (args.len > 1) args[1] else "";
                 const text = try std.fmt.allocPrint(self.a, "{s}({s})", .{ title, section });
                 try self.addText(h, text, true);
+                // Date, source and manual are not shown; `writeMan` gets them
+                // from the heading's title field, one per line.
+                if (args.len > 2) {
+                    var fields: std.ArrayList(u8) = .empty;
+                    for (args[2..@min(args.len, 5)], 0..) |field, k| {
+                        if (k > 0) try fields.append(self.a, '\n');
+                        try fields.appendSlice(self.a, try self.address(field));
+                    }
+                    h.title = fields.items;
+                }
             },
             .SH => try self.heading(2, args),
             .SS => try self.heading(3, args),
@@ -828,7 +848,7 @@ pub const Parser = struct {
         if (std.mem.endsWith(u8, l, "\\}") and closesBlock(l)) l = l[0 .. l.len - 2];
         if (std.mem.eql(u8, std.mem.trim(u8, l, " \t"), ".")) return;
 
-        if (self.keep_comments and !self.nofill) {
+        if (self.keep_comments) {
             if (commentBody(l)) |t| return self.addComment(t);
         }
         if (self.in_tbl) return self.tblLine(l);
@@ -843,11 +863,13 @@ pub const Parser = struct {
     }
 
     /// A whole-line comment becomes an HTML comment: inline when it sits in a
-    /// paragraph, a block otherwise. In a heading or term it is dropped.
+    /// paragraph, a block otherwise. One in a heading, term, link or no-fill
+    /// block is placed after it.
     fn addComment(self: *Parser, text: []const u8) Allocator.Error!void {
-        if (self.pending_heading != null or self.pending_term != null or self.link != null) return;
-        const n = try self.node(if (self.para != null) .html_inline else .html_block);
+        const later = self.pending_heading != null or self.pending_term != null or self.link != null or self.code.items.len > 0;
+        const n = try self.node(if (!later and self.para != null) .html_inline else .html_block);
         n.literal = try htmlComment(self.a, text);
+        if (later) return self.deferred.append(self.a, n);
         if (self.para) |p| p.appendChild(n) else self.cur.appendChild(n);
     }
 
@@ -1306,6 +1328,7 @@ pub fn parseOptions(gpa: Allocator, source: []const u8, options: Options) Alloca
     while (try escape.nextLogicalLine(a, &lines)) |l| try p.line(l);
     try p.endTable();
     try p.flushCode();
+    p.placeComments();
     return .{ .arena = arena, .root = root };
 }
 
