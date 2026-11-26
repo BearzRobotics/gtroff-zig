@@ -1,5 +1,9 @@
 //! gtroff-zig: reads roff manual pages (man(7), later mdoc(7)) into an
 //! md-zig tree, so one renderer can show Markdown and man pages alike.
+//!
+//! Pages are often untrusted. Link addresses are kept as written, so render
+//! them to HTML with `doc.writeHtmlOptions(gpa, writer, .{ .safe = true })`;
+//! `writeHtml` passes `javascript:` links through.
 
 const std = @import("std");
 const md = @import("md");

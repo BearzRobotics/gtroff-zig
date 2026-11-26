@@ -31,7 +31,9 @@ const char *gtroff_version(void);
  * color nonzero adds ANSI styles. On error *out is NULL and *out_len is 0. */
 int gtroff_man_to_text(const uint8_t *src, size_t len, size_t width, int color, uint8_t **out, size_t *out_len);
 
-/* Renders a man(7) page as HTML. */
+/* Renders a man(7) page as HTML. Safe for untrusted pages: raw HTML is left out
+ * and javascript:, vbscript:, file: and non-image data: link addresses are
+ * emptied. */
 int gtroff_man_to_html(const uint8_t *src, size_t len, uint8_t **out, size_t *out_len);
 
 /* The same for mdoc(7) pages. */

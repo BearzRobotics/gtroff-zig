@@ -49,7 +49,12 @@ fn toHtml(format: Format, src: ?[*]const u8, len: usize, out: ?*?[*]u8, out_len:
         .mdoc => gtroff.parseMdoc(gpa, bytes),
     }) catch return err_out_of_memory;
     defer doc.deinit();
-    const s = doc.toHtmlAlloc(gpa) catch return err_out_of_memory;
+    // The page is untrusted: safe mode leaves out raw HTML and empties
+    // `javascript:` and similar link addresses.
+    var html: std.Io.Writer.Allocating = .init(gpa);
+    defer html.deinit();
+    doc.writeHtmlOptions(gpa, &html.writer, .{ .safe = true }) catch return err_out_of_memory;
+    const s = html.toOwnedSlice() catch return err_out_of_memory;
     o.* = s.ptr;
     l.* = s.len;
     return ok;

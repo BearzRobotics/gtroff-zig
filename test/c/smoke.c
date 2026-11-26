@@ -26,6 +26,16 @@ int main(void) {
     CHECK(contains(out, n, "<strong>directory</strong>"));
     gtroff_free_string(out, n);
 
+    const char *evil = ".UR javascript:alert(1)\nclick\n.UE\n";
+    CHECK(gtroff_man_to_html((const uint8_t *)evil, strlen(evil), &out, &n) == GTROFF_OK);
+    CHECK(contains(out, n, "click"));
+    CHECK(!contains(out, n, "javascript:"));
+    gtroff_free_string(out, n);
+    const char *evil_mdoc = ".Lk javascript:alert(1) click\n";
+    CHECK(gtroff_mdoc_to_html((const uint8_t *)evil_mdoc, strlen(evil_mdoc), &out, &n) == GTROFF_OK);
+    CHECK(!contains(out, n, "javascript:"));
+    gtroff_free_string(out, n);
+
     const char *mdoc = ".Dd today\n.Dt LS 1\n.Os\n.Sh NAME\n.Nm ls\n.Nd list files\n";
     CHECK(gtroff_mdoc_to_text((const uint8_t *)mdoc, strlen(mdoc), 60, 0, &out, &n) == GTROFF_OK);
     CHECK(contains(out, n, "**ls** \xe2\x80\x94 list files"));
