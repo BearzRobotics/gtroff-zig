@@ -136,7 +136,7 @@ test "tables and definition lists" {
     defer doc.deinit();
     const out = try gtroff.toManAlloc(gpa, &doc, .{});
     defer gpa.free(out);
-    try testing.expect(std.mem.indexOf(u8, out, ".TS\nallbox tab(\\t);\nlb rb\nl r.\na\tb\n1\t2\n.TE\n") != null);
+    try testing.expect(std.mem.indexOf(u8, out, ".TS\nallbox;\nlb rb\nl r.\na\tb\n1\t2\n.TE\n") != null);
     try testing.expect(std.mem.indexOf(u8, out, ".TP\nTerm\nDefinition\n") != null);
 }
 

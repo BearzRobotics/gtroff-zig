@@ -337,7 +337,8 @@ const Gen = struct {
             try hdr.append(self.a, 'b');
         }
         try self.req(".TS");
-        try self.req("allbox tab(\\t);");
+        // Cells are separated by tabs, which is the tbl default.
+        try self.req("allbox;");
         try self.req(hdr.items);
         try self.req(try std.fmt.allocPrint(self.a, "{s}.", .{cols.items}));
         var row = n.first_child;

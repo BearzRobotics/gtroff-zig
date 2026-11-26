@@ -59,3 +59,16 @@ test "BUG-004: a false block closed on its own line does not drop the rest of th
     try expect(.man, ".if t \\{\\\n.\\}\nkept\n", "kept\n");
     try expect(.man, ".if t \\{\n.if n \\{ x \\}\nhidden\n.\\}\nkept\n", "kept\n");
 }
+
+test "BUG-005: a written table reads back with its columns" {
+    var doc = try md.Document.parse(testing.allocator, "| name | count |\n|---|---|\n| apple | 12 |\n", .{ .extensions = md.Extensions.all });
+    defer doc.deinit();
+    const written = try gtroff.toManAlloc(testing.allocator, &doc, .{});
+    defer testing.allocator.free(written);
+    try testing.expect(std.mem.find(u8, written, "\n.TS\nallbox;\n") != null);
+    var back = try gtroff.parseMan(testing.allocator, written);
+    defer back.deinit();
+    const html = try back.toHtmlAlloc(testing.allocator);
+    defer testing.allocator.free(html);
+    try testing.expect(std.mem.find(u8, html, "<td>apple</td>\n<td>12</td>") != null);
+}
