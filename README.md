@@ -62,7 +62,7 @@ try doc.writeHtmlOptions(gpa, writer, .{ .safe = true });
 
 ## Using it
 
-Add it to a project with `zig fetch --save https://github.com/BearzRobotics/gtroff-zig/releases/download/v0.6.0/gtroff-0.6.0.tar.gz`
+Add it to a project with `zig fetch --save https://github.com/BearzRobotics/gtroff-zig/releases/download/v0.6.1/gtroff-0.6.1.tar.gz`
 and import the `gtroff` module.
 
 **C interface (experimental, unstable):** `include/gtroff.h` and `zig build c-api`
