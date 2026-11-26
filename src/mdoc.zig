@@ -1083,8 +1083,8 @@ const Parser = struct {
                 }
             },
             .Ef => self.base_font = .roman,
-            .Ex => try self.textMacro(args, "The ", " utility exits 0 on success, and >0 if an error occurs.", " utilities exit 0 on success, and >0 if an error occurs.", false),
-            .Rv => try self.textMacro(args, "The ", " function returns the value 0 if successful; otherwise the value -1 is returned and the global variable errno is set to indicate the error.", " functions return the value 0 if successful; otherwise the value -1 is returned and the global variable errno is set to indicate the error.", true),
+            .Ex => try self.textMacro(args, "The", "utility exits 0 on success, and >0 if an error occurs.", "utilities exit 0 on success, and >0 if an error occurs.", false),
+            .Rv => try self.textMacro(args, "The", "function returns the value 0 if successful; otherwise the value -1 is returned and the global variable errno is set to indicate the error.", "functions return the value 0 if successful; otherwise the value -1 is returned and the global variable errno is set to indicate the error.", true),
             .Rs => self.rs = .{},
             .Re => try self.endReference(),
             .@"%A" => try self.refField("A", args),

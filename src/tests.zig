@@ -472,13 +472,11 @@ test "mdoc: links and mail addresses" {
 }
 
 test "mdoc: .Ex and .Rv write their sentences" {
-    // Checked as terminal text, which collapses the doubled blanks the reader
-    // currently leaves around names (a known bug, visible in HTML).
     var doc = try gtroff.parseMdoc(testing.allocator, ".Ex -std ls\n.Pp\n.Rv -std open close\n");
     defer doc.deinit();
-    const out = try doc.toTextAlloc(testing.allocator, .{ .width = 0 });
+    const out = try doc.toHtmlAlloc(testing.allocator);
     defer testing.allocator.free(out);
-    try testing.expectEqualStrings("The **ls** utility exits 0 on success, and >0 if an error occurs.\n\n" ++
-        "The **open()** and **close()** functions return the value 0 if successful; " ++
-        "otherwise the value -1 is returned and the global variable errno is set to indicate the error.\n", out);
+    try testing.expectEqualStrings("<p>The <strong>ls</strong> utility exits 0 on success, and &gt;0 if an error occurs.</p>\n" ++
+        "<p>The <strong>open()</strong> and <strong>close()</strong> functions return the value 0 if successful; " ++
+        "otherwise the value -1 is returned and the global variable errno is set to indicate the error.</p>\n", out);
 }
