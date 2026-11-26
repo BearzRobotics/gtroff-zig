@@ -308,7 +308,7 @@ pub fn segments(a: Allocator, st: *State, line_in: []const u8) Allocator.Error!R
                 if (delta != 0) {
                     const gop = try st.regs.getOrPut(a, nm.name);
                     if (!gop.found_existing) gop.value_ptr.* = 0;
-                    gop.value_ptr.* += delta;
+                    gop.value_ptr.* +|= delta;
                 }
                 const v = st.regs.get(nm.name) orelse 0;
                 try buf.print(a, "{d}", .{v});
@@ -452,7 +452,7 @@ pub fn interpolate(a: Allocator, st: *State, s: []const u8) Allocator.Error![]co
                 if (delta != 0) {
                     const gop = try st.regs.getOrPut(a, nm.name);
                     if (!gop.found_existing) gop.value_ptr.* = 0;
-                    gop.value_ptr.* += delta;
+                    gop.value_ptr.* +|= delta;
                 }
                 try out.print(a, "{d}", .{st.regs.get(nm.name) orelse 0});
             } else if (st.useString(nm.name)) |v| {

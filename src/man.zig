@@ -808,7 +808,7 @@ pub const Parser = struct {
         const relative = text.len > 0 and (text[0] == '+' or text[0] == '-');
         const v = expr.eval(text) catch return;
         const old = self.st.regs.get(args[0]) orelse 0;
-        try self.st.regs.put(self.a, try self.a.dupe(u8, args[0]), if (relative) old + v else v);
+        try self.st.regs.put(self.a, try self.a.dupe(u8, args[0]), if (relative) old +| v else v);
     }
 
     fn elseBranch(self: *Parser, rest: []const u8) Allocator.Error!void {
