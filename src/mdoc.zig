@@ -1245,11 +1245,33 @@ const Parser = struct {
         }
     }
 
+    /// One line of a table cell, read as mdoc.
+    fn cellLine(context: *anyopaque, table: *man.Parser, cell: *Node, l: []const u8) Allocator.Error!void {
+        const self: *Parser = @ptrCast(@alignCast(context));
+        const saved_cur = self.cur;
+        const saved_target = self.target;
+        const saved_para = self.para;
+        self.st = table.st;
+        self.cur = cell;
+        self.target = cell;
+        self.para = cell;
+        const line_no = self.line_no;
+        try self.line(l);
+        // A table opened inside the cell ends with the line that opened it.
+        self.tbl = null;
+        self.line_no = line_no;
+        self.cur = saved_cur;
+        self.target = saved_target;
+        self.para = saved_para;
+        table.st = self.st;
+    }
+
     /// Builds the open table with the man(7) reader's tbl code.
     fn endTable(self: *Parser) Allocator.Error!void {
         const rows = self.tbl orelse return;
         self.tbl = null;
         var sub: man.Parser = .{ .a = self.a, .root = self.cur, .container = self.cur, .cur = self.cur, .st = self.st, .in_tbl = true, .tbl_lines = rows, .padded_cells = self.padded_cells };
+        sub.cell_lines = .{ .context = self, .run = cellLine };
         try sub.endTable();
         self.st = sub.st;
         self.padded_cells = sub.padded_cells;

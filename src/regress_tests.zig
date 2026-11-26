@@ -489,3 +489,11 @@ test "BUG-063: .Sm off keeps the blank before the next word" {
 test "BUG-067: mdoc conditionals see the registers the page sets" {
     try expect(.mdoc, ".nr SL 1\n.if \\n(SL \\{\\\nshown\n.\\}\n.rr SL\n.if \\n(SL hidden\n", "shown\n");
 }
+
+test "BUG-068: mdoc macros work inside table cells" {
+    const out = try render(.mdoc, ".TS\nl l.\nT{\n.Nm crypt_r ,\n.Nm crypt_ra\nT}\tsafe\n.TE\nafter\n");
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, "**crypt_r**, **crypt_ra**") != null);
+    try testing.expect(std.mem.find(u8, out, "safe") != null);
+    try testing.expect(std.mem.find(u8, out, "after") != null);
+}

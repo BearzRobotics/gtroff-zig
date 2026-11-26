@@ -126,6 +126,12 @@ pub const Macro = struct {
 /// Indent of tagged paragraphs until one gives another.
 const default_indent: u16 = 7;
 
+/// Fills a table cell from one input line, on behalf of another reader.
+pub const CellLines = struct {
+    context: *anyopaque,
+    run: *const fn (context: *anyopaque, table: *Parser, cell: *Node, line: []const u8) Allocator.Error!void,
+};
+
 pub const Parser = struct {
     a: Allocator,
     root: *Node,
@@ -167,6 +173,9 @@ pub const Parser = struct {
     macro_depth: usize = 0,
     expanded_lines: usize = 0,
     padded_cells: usize = 0,
+    /// Set when another reader owns the page: it runs the lines that fill a
+    /// table cell, since they may use its macros.
+    cell_lines: ?CellLines = null,
     expanded_bytes: usize = 0,
     skip_depth: usize = 0,
     /// Results of the `.ie` requests that still wait for their `.el`.
@@ -995,6 +1004,11 @@ pub const Parser = struct {
         };
     }
 
+    fn cellLine(self: *Parser, cell: *Node, l: []const u8) Allocator.Error!void {
+        if (self.cell_lines) |other| return other.run(other.context, self, cell, l);
+        try self.line(l);
+    }
+
     /// Builds a `table` from the collected tbl(1) lines: options, row formats
     /// (up to a line ending in `.`), then rows of tab separated cells, `_` and
     /// `=` rules, and `T{ ... T}` text blocks. Boxes and rules are not drawn;
@@ -1051,15 +1065,19 @@ pub const Parser = struct {
             if (t[0] == '.' and !(t.len > 1 and std.ascii.isDigit(t[1]))) {
                 // Requests that print text make a row of their own; layout
                 // requests (`.sp`, `.ne`) are skipped.
-                if (!self.printsText(t[1..])) continue;
+                if (self.cell_lines == null and !self.printsText(t[1..])) continue;
                 const row = try self.node(.table_row);
                 tbl.appendChild(row);
                 const cell = try self.node(.table_cell);
                 row.appendChild(cell);
                 const saved_para = self.para;
                 self.para = cell;
-                try self.line(l);
+                try self.cellLine(cell, l);
                 self.para = saved_para;
+                if (cell.first_child == null) {
+                    row.unlink();
+                    continue;
+                }
                 rows += 1;
                 continue;
             }
@@ -1087,7 +1105,7 @@ pub const Parser = struct {
                     const saved_para = self.para;
                     self.para = cell;
                     while (j < lines.len and !std.mem.startsWith(u8, std.mem.trim(u8, lines[j], " \t"), "T}")) : (j += 1) {
-                        try self.line(lines[j]);
+                        try self.cellLine(cell, lines[j]);
                         self.para = cell;
                     }
                     // A table opened inside the block ends with the block.
