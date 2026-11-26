@@ -175,3 +175,11 @@ test "BUG-034: options cannot break out of a macro argument" {
     defer testing.allocator.free(out);
     try testing.expect(std.mem.startsWith(u8, out, ".TH \"a  b\" \"7\" \"x .so /dev/null\" \"\" \"\"\n"));
 }
+
+test "BUG-035: footnote labels and comment lines are made safe" {
+    const out = try writeFrom(markdown("---\na: b\\\n---\ntext[^\\so]\n\n[^\\so]: note\n"), .{});
+    defer testing.allocator.free(out);
+    try testing.expect(std.mem.find(u8, out, ".\\\" a: b\\&\n") != null);
+    try testing.expect(std.mem.find(u8, out, "[\\eso]") != null);
+    try testing.expect(std.mem.find(u8, out, "[\\so]") == null);
+}

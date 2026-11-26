@@ -241,14 +241,15 @@ const Gen = struct {
                     if (lines.peek() == null and l.len == 0) break;
                     try self.nl();
                     try self.raw(".\\\" ");
-                    try self.raw(l);
-                    try self.raw("\n");
+                    try self.commentLine(l);
                 }
                 try self.req(".\\\" ---");
             },
             .footnote_def => {
                 try self.lead(in_item, first);
-                try self.raw(try std.fmt.allocPrint(self.a, "[{s}] ", .{n.literal}));
+                try self.raw("[");
+                try self.text(n.literal, false);
+                try self.raw("] ");
                 try self.blocks(n, null, true);
             },
             else => {},
@@ -276,12 +277,17 @@ const Gen = struct {
         while (lines.next()) |l| {
             try self.nl();
             try self.raw(".\\\"");
-            if (l.len != 0) {
-                try self.raw(" ");
-                try self.raw(std.mem.trimEnd(u8, l, "\r"));
-            }
-            try self.raw("\n");
+            if (l.len != 0) try self.raw(" ");
+            try self.commentLine(std.mem.trimEnd(u8, l, "\r"));
         }
+    }
+
+    /// The rest of a comment line. It must not end in a backslash, which some
+    /// readers take to join the next line to the comment.
+    fn commentLine(self: *Gen, l: []const u8) Allocator.Error!void {
+        for (l) |c| try self.raw(if (c < 32 and c != '\t') " " else &.{c});
+        if (std.mem.endsWith(u8, l, "\\")) try self.raw("&");
+        try self.raw("\n");
     }
 
     fn list(self: *Gen, n: *Node, in_item: bool) Error!void {
@@ -457,7 +463,11 @@ const Gen = struct {
                 },
                 .link => skip_prefix = try self.link(c, font),
                 .image => try self.inlines(c, font, false),
-                .footnote_ref => try self.raw(try std.fmt.allocPrint(self.a, "[{s}]", .{c.literal})),
+                .footnote_ref => {
+                    try self.raw("[");
+                    try self.text(c.literal, false);
+                    try self.raw("]");
+                },
                 else => {},
             }
         }
