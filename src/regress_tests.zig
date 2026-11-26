@@ -231,3 +231,13 @@ test "BUG-021: .SY and .OP read the escapes in their arguments" {
 test "BUG-022: control lines with blanks or an apostrophe work in no-fill blocks" {
     try expect(.man, ".nf\na\n'br\n.  fi\nfilled one\nfilled two\n", "a\n\nfilled one filled two\n");
 }
+
+test "BUG-023: headings, tables and links in no-fill blocks stay in order" {
+    try expect(.man, ".SH ONE\n.nf\ncode\n.SH TWO\nmore\ntext\n", "## ONE\n\n       code\n\n## TWO\n\n       more text\n");
+    const out = try render(.man, ".nf\nbefore\n.TS\nl.\ncell\n.TE\nafter\n.fi\n");
+    defer testing.allocator.free(out);
+    const before = std.mem.find(u8, out, "before").?;
+    const cell = std.mem.find(u8, out, "cell").?;
+    try testing.expect(before < cell and cell < std.mem.find(u8, out, "after").?);
+    try expect(.man, ".nf\nsee\n.UR http://x.example\n.UE .\nend\n.fi\n", "see <http://x.example>.\nend\n");
+}

@@ -133,6 +133,8 @@ const Parser = struct {
 
     nofill: bool = false,
     code: std.ArrayList(u8) = .empty,
+    /// Address of a `.UR`/`.MT` opened in a no-fill block.
+    code_link: ?[]const u8 = null,
     in_tbl: bool = false,
     tbl_lines: std.ArrayList([]const u8) = .empty,
     /// While skipping an `.ig` block: the line that ends it.
@@ -172,7 +174,9 @@ const Parser = struct {
     }
 
     /// Back to the level's container: no open definition or list.
-    fn endGroup(self: *Parser) void {
+    fn endGroup(self: *Parser) Allocator.Error!void {
+        // Buffered code belongs here, before whatever comes next.
+        try self.flushCode();
         self.endPara();
         self.open_dl = null;
         self.open_list = null;
@@ -196,6 +200,7 @@ const Parser = struct {
         if (self.pending_term) |t| return t;
         if (self.link) |l| return l;
         if (self.para) |p| return p;
+        try self.flushCode();
         const p = try self.node(.paragraph);
         self.cur.appendChild(p);
         self.para = p;
@@ -214,7 +219,9 @@ const Parser = struct {
     const sub_indent: u16 = 3;
 
     fn heading(self: *Parser, level: u8, args: []const []const u8) Allocator.Error!void {
-        self.endGroup();
+        try self.endGroup();
+        self.nofill = false;
+        self.code_link = null;
         self.depth = 0;
         const h = try self.node(.heading);
         h.level = level;
@@ -249,6 +256,7 @@ const Parser = struct {
         if (width) |w| if (escape.columns(w)) |c| {
             self.indent = c;
         };
+        try self.flushCode();
         self.endPara();
         self.open_list = null;
         const dl = self.open_dl orelse blk: {
@@ -270,6 +278,7 @@ const Parser = struct {
     }
 
     fn startBullet(self: *Parser) Allocator.Error!void {
+        try self.flushCode();
         self.endPara();
         self.open_dl = null;
         const list = self.open_list orelse blk: {
@@ -290,7 +299,7 @@ const Parser = struct {
     }
 
     fn pushQuote(self: *Parser, width: ?[]const u8) Allocator.Error!void {
-        self.endGroup();
+        try self.endGroup();
         if (self.depth >= max_levels) return;
         const cols: u16 = if (width) |w| (escape.columns(w) orelse self.indent) else self.indent;
         self.levels[self.depth] = self.container;
@@ -304,8 +313,8 @@ const Parser = struct {
         self.cur = q;
     }
 
-    fn popQuote(self: *Parser) void {
-        self.endGroup();
+    fn popQuote(self: *Parser) Allocator.Error!void {
+        try self.endGroup();
         if (self.depth == 0) return;
         self.depth -= 1;
         self.container = self.levels[self.depth];
@@ -560,7 +569,7 @@ const Parser = struct {
 
         switch (req) {
             .TH => {
-                self.endGroup();
+                try self.endGroup();
                 const h = try self.node(.heading);
                 h.level = 1;
                 self.root.appendChild(h);
@@ -571,7 +580,7 @@ const Parser = struct {
             },
             .SH => try self.heading(2, args),
             .SS => try self.heading(3, args),
-            .PP, .P, .LP, .HP => self.endGroup(),
+            .PP, .P, .LP, .HP => try self.endGroup(),
             .TP, .TQ => try self.startTagged(null, if (args.len > 0) args[0] else null),
             .IP => {
                 if (args.len == 0) {
@@ -582,7 +591,7 @@ const Parser = struct {
                 } else try self.startTagged(args[0], if (args.len > 1) args[1] else null);
             },
             .RS => try self.pushQuote(if (args.len > 0) args[0] else null),
-            .RE => self.popQuote(),
+            .RE => try self.popQuote(),
             .B => try self.singleFont(Font.b, args),
             .I => try self.singleFont(Font.i, args),
             .SM => try self.singleFont(Font.roman, args),
@@ -608,12 +617,19 @@ const Parser = struct {
                 try self.flushCode();
             },
             .TS => {
+                try self.flushCode();
                 self.endPara();
                 self.in_tbl = true;
                 self.tbl_lines = .empty;
             },
             .TE => {},
             .UR, .MT => {
+                if (self.nofill) {
+                    // A code block holds no links: the address follows the text.
+                    const dest = try self.address(if (args.len > 0) args[0] else "");
+                    self.code_link = if (req == .MT) try std.fmt.allocPrint(self.a, "mailto:{s}", .{dest}) else dest;
+                    return;
+                }
                 const target = try self.sink();
                 try self.lineSep(target);
                 const lnk = try self.node(.link);
@@ -623,7 +639,15 @@ const Parser = struct {
                 self.link = lnk;
             },
             .UE, .ME => {
-                if (self.link) |lnk| {
+                if (self.code_link) |dest| {
+                    self.code_link = null;
+                    if (std.mem.endsWith(u8, self.code.items, "\n")) {
+                        self.code.items.len -= 1;
+                        try self.code.append(self.a, ' ');
+                    }
+                    const punct = try self.address(if (args.len > 0) args[0] else "");
+                    try self.code.print(self.a, "<{s}>{s}\n", .{ dest, punct });
+                } else if (self.link) |lnk| {
                     // A link without text shows its address.
                     if (lnk.first_child == null) try self.addRun(lnk, lnk.literal, .roman);
                     self.link = null;
@@ -928,6 +952,10 @@ const Parser = struct {
         // may start another table, which must not overwrite these.
         const lines = self.tbl_lines.items;
         self.tbl_lines = .empty;
+        // The cells are filled text even inside a no-fill block.
+        const nofill = self.nofill;
+        self.nofill = false;
+        defer self.nofill = nofill;
         var i: usize = 0;
         var tab: u8 = '\t';
         if (i < lines.len) {
@@ -1038,7 +1066,7 @@ const Parser = struct {
             };
             first.header = header_by_rule or (bold_first and rows > 1);
         }
-        self.endGroup();
+        try self.endGroup();
         self.cur.appendChild(tbl);
     }
 };
